@@ -162,10 +162,6 @@ void DvppVenc::Callback(acldvppPicDesc    *input,
         {
             ACLLITE_LOG_ERROR("Save venc file failed, error %d", ret);
         }
-        else
-        {
-            ACLLITE_LOG_INFO("success to callback, stream size:%u", size);
-        }
     }
     else
     {
@@ -187,6 +183,20 @@ AclLiteError DvppVenc::SaveVencFile(void *vencData, uint32_t size)
     {
         data = CopyDataToHost(vencData, size, vencInfo_.runMode, MEMORY_NORMAL);
     }
+    
+    // 如果设置了回调函数，调用回调而不是写文件
+    if (vencInfo_.dataCallback != nullptr)
+    {
+        vencInfo_.dataCallback(data, size, vencInfo_.callbackUserData);
+        
+        if (vencInfo_.runMode == ACL_HOST)
+        {
+            delete[] ((uint8_t *)data);
+        }
+        return ACLLITE_OK;
+    }
+    
+    // 否则写入文件（原有逻辑）
     size_t ret = fwrite(data, 1, size, outFp_);
     if (ret != size)
     {
@@ -213,13 +223,22 @@ AclLiteError DvppVenc::SaveVencFile(void *vencData, uint32_t size)
 
 AclLiteError DvppVenc::Init()
 {
-    outFp_ = fopen(vencInfo_.outFile.c_str(), "wb+");
-    if (outFp_ == nullptr)
+    // 只有在没有设置回调函数时才打开文件
+    if (vencInfo_.dataCallback == nullptr)
     {
-        ACLLITE_LOG_ERROR("Open file %s failed, error %s",
-                          vencInfo_.outFile.c_str(),
-                          strerror(errno));
-        return ACLLITE_ERROR_OPEN_FILE;
+        outFp_ = fopen(vencInfo_.outFile.c_str(), "wb+");
+        if (outFp_ == nullptr)
+        {
+            ACLLITE_LOG_ERROR("Open file %s failed, error %s",
+                              vencInfo_.outFile.c_str(),
+                              strerror(errno));
+            return ACLLITE_ERROR_OPEN_FILE;
+        }
+    }
+    else
+    {
+        outFp_ = nullptr;  // 使用回调时不需要文件
+        ACLLITE_LOG_INFO("Using callback mode, no file output");
     }
 
     return InitResource();

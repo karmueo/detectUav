@@ -1,4 +1,3 @@
-
 #include "pushrtspthread.h"
 #include "AclLiteApp.h"
 #include <chrono>
@@ -23,8 +22,17 @@ AclLiteError PushRtspThread::Init()
 {
     g_frameSeq = 0;
     XInitThreads();
-    AclLiteError ret =
-        g_picToRtsp.AvInit(kResizeWidth, kResizeHeight, g_rtspUrl);
+    
+    // 获取当前ACL context用于硬件编码器
+    aclrtContext context = nullptr;
+    aclError aclRet = aclrtGetCurrentContext(&context);
+    if (aclRet != ACL_SUCCESS)
+    {
+        ACLLITE_LOG_ERROR("Failed to get ACL context, error: %d", aclRet);
+        context = nullptr; // VideoWriter会自动获取
+    }
+    
+    AclLiteError ret = g_picToRtsp.AvInit(kResizeWidth, kResizeHeight, g_rtspUrl, context);
     if (ret != ACLLITE_OK)
     {
         ACLLITE_LOG_ERROR("AvInit rtsp failed");
@@ -82,16 +90,10 @@ PushRtspThread::DisplayMsgProcess(std::shared_ptr<DetectDataMsg> detectDataMsg)
         }
         for (int i = 0; i < detectDataMsg->frame.size(); i++)
         {
-            cv::Mat resized_image;
-            // 使用INTER_NEAREST提高resize速度（最快的算法）
-            cv::resize(detectDataMsg->frame[i],
-                       resized_image,
-                       cv::Size(kResizeWidth, kResizeHeight),
-                       0, 0, cv::INTER_NEAREST);
-
-            g_picToRtsp.BgrDataToRtsp(resized_image.data,
-                                      resized_image.cols * resized_image.rows *
-                                          kBgrMultiplier,
+            // 数据已在DataOutput中resize,直接使用
+            cv::Mat &frame = detectDataMsg->frame[i];
+            g_picToRtsp.BgrDataToRtsp(frame.data,
+                                      frame.cols * frame.rows * kBgrMultiplier,
                                       g_frameSeq);  // 使用当前序号
         }
         g_frameSeq++;  // 推流完成后才递增
@@ -106,16 +108,10 @@ PushRtspThread::DisplayMsgProcess(std::shared_ptr<DetectDataMsg> detectDataMsg)
     
     for (int i = 0; i < detectDataMsg->frame.size(); i++)
     {
-        cv::Mat resized_image;
-        // 使用INTER_NEAREST提高resize速度(最快的算法)
-        cv::resize(detectDataMsg->frame[i],
-                   resized_image,
-                   cv::Size(kResizeWidth, kResizeHeight),
-                   0, 0, cv::INTER_NEAREST);
-
-        g_picToRtsp.BgrDataToRtsp(resized_image.data,
-                                  resized_image.cols * resized_image.rows *
-                                      kBgrMultiplier,
+        // 数据已在DataOutput中resize,直接使用
+        cv::Mat &frame = detectDataMsg->frame[i];
+        g_picToRtsp.BgrDataToRtsp(frame.data,
+                                  frame.cols * frame.rows * kBgrMultiplier,
                                   g_frameSeq);  // 使用当前序号
     }
     g_frameSeq++;  // 推流完成后才递增

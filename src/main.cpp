@@ -45,6 +45,7 @@ int                  kPostNum = 1;
 int                  kFramesPerSecond = 1000;
 uint32_t             kMsgQueueSize = 3;
 uint32_t             argNum = 2;
+int                  kFrameSkip = 2;  // 默认跳帧参数:每2帧处理1帧
 } // namespace
 
 int MainThreadProcess(uint32_t msgId, shared_ptr<void> msgData, void *userData)
@@ -134,6 +135,15 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                                                .asInt();
                 }
 
+                if (root["device_config"][i]["model_config"][j]
+                        ["frame_skip"]
+                            .type() != Json::nullValue)
+                {
+                    kFrameSkip = root["device_config"][i]["model_config"]
+                                     [j]["frame_skip"]
+                                         .asInt();
+                }
+
                 if (modelWidth < 0 || modelHeigth < 0 || kBatch < 1 ||
                     kPostNum < 1 || kFramesPerSecond < 1)
                 {
@@ -195,7 +205,8 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                                             inferName,
                                             kPostNum,
                                             kBatch,
-                                            kFramesPerSecond);
+                                            kFramesPerSecond,
+                                            kFrameSkip);
                     dataInputParam.threadInstName.assign(dataInputName.c_str());
                     dataInputParam.context = context;
                     dataInputParam.runMode = runMode;
@@ -242,6 +253,7 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                             rtspDisplayName.c_str());
                         rtspDisplayThreadParam.context = context;
                         rtspDisplayThreadParam.runMode = runMode;
+                        rtspDisplayThreadParam.queueSize = 1000;  // 增大队列避免积压
                         threadTbl.push_back(rtspDisplayThreadParam);
                     }
                     kExitCount++;

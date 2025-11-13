@@ -38,7 +38,8 @@ class DataInputThread : public AclLiteThread
                     std::string   inferName,
                     int           postThreadNum,
                     uint32_t      batch,
-                    int           framesPerSecond);
+                    int           framesPerSecond,
+                    int           frameSkip = 2);
 
     ~DataInputThread();
     AclLiteError Init();
@@ -83,6 +84,7 @@ class DataInputThread : public AclLiteThread
     int64_t realWaitTime_;
     int64_t waitTime_;
     int     framesPerSecond_;
+    int     frameSkip_;  // 跳帧参数:每frameSkip帧处理1帧,默认2
 };
 
 #endif

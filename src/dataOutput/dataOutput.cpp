@@ -25,8 +25,8 @@ using namespace std;
 
 namespace
 {
-const uint32_t kOutputWidth = 540;
-const uint32_t kOutputHeigth = 270;
+const uint32_t kOutputWidth = 960;   // 与PushRtspThread保持一致
+const uint32_t kOutputHeigth = 540;  // 与PushRtspThread保持一致
 const uint32_t kSleepTime = 500;
 uint32_t       kWaitTime = 1000;
 const uint32_t kOneSec = 1000000;
@@ -315,7 +315,10 @@ AclLiteError
 DataOutputThread::DisplayMsgSend(shared_ptr<DetectDataMsg> detectDataMsg)
 {
     AclLiteError ret;
-    while (1)
+    int retryCount = 0;
+    const int maxRetry = 3;  // 最多重试3次,避免阻塞
+    
+    while (retryCount < maxRetry)
     {
         if (outputDataType_ == "rtsp")
         {
@@ -325,6 +328,15 @@ DataOutputThread::DisplayMsgSend(shared_ptr<DetectDataMsg> detectDataMsg)
         }
         if (ret == ACLLITE_ERROR_ENQUEUE)
         {
+            retryCount++;
+            if (retryCount >= maxRetry) {
+                // 队列满,丢弃此帧
+                static int dropCount = 0;
+                if (++dropCount % 30 == 0) {
+                    ACLLITE_LOG_INFO("[DataOutput] Dropped %d frames due to rtsp queue full", dropCount);
+                }
+                return ACLLITE_OK;  // 返回OK,继续处理下一帧
+            }
             usleep(kSleepTime);
             continue;
         }
@@ -346,6 +358,17 @@ DataOutputThread::DisplayMsgSend(shared_ptr<DetectDataMsg> detectDataMsg)
 AclLiteError
 DataOutputThread::SendImageToRtsp(shared_ptr<DetectDataMsg> &detectDataMsg)
 {
+    // Resize图像到推流分辨率
+    for (int i = 0; i < detectDataMsg->frame.size(); i++)
+    {
+        cv::resize(detectDataMsg->frame[i],
+                   detectDataMsg->frame[i],
+                   cv::Size(kOutputWidth, kOutputHeigth),
+                   0,
+                   0,
+                   cv::INTER_LINEAR);
+    }
+    
     AclLiteError ret = DisplayMsgSend(detectDataMsg);
     if (ret != ACLLITE_OK)
     {

@@ -58,6 +58,7 @@ class AclLiteThreadMgr
     void SetStatus(AclLiteThreadStatus status) { status_ = status; }
     AclLiteThreadStatus GetStatus() { return status_; }
     AclLiteError        WaitThreadInitEnd();
+    uint32_t GetQueueSize() { return msgQueue_.Size(); }
 
   public:
     bool                                             isExit_;

@@ -294,3 +294,23 @@ int GetAclLiteThreadIdByName(const string &threadName)
     AclLiteApp &app = AclLiteApp::GetInstance();
     return app.GetAclLiteThreadIdByName(threadName);
 }
+
+void AclLiteApp::PrintQueueStatus()
+{
+    ACLLITE_LOG_INFO("========== Thread Queue Status ==========");
+    for (size_t i = 0; i < threadList_.size(); i++)
+    {
+        const std::string &name = threadList_[i]->GetThreadName();
+        uint32_t queueSize = threadList_[i]->GetQueueSize();
+        if (queueSize > 0 || name.find("DataInput") != std::string::npos || 
+            name.find("Preprocess") != std::string::npos ||
+            name.find("Inference") != std::string::npos ||
+            name.find("Postprocess") != std::string::npos ||
+            name.find("Output") != std::string::npos ||
+            name.find("Rtsp") != std::string::npos)
+        {
+            ACLLITE_LOG_INFO("  [%s] Queue: %u", name.c_str(), queueSize);
+        }
+    }
+    ACLLITE_LOG_INFO("=========================================");
+}

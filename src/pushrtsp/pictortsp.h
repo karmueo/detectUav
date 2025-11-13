@@ -1,5 +1,19 @@
 #pragma once
 #include "common.h"
+// 注意：必须在common.h之后包含，因为common.h包含opencv，避免命名冲突
+#include "../../common/include/VideoWriter.h"
+#include <vector>
+#include <mutex>
+#include <queue>
+#include <condition_variable>
+#include <thread>
+#include <atomic>
+
+// 编码数据包结构
+struct H264Packet {
+    std::vector<uint8_t> data;
+    uint64_t pts;
+};
 
 class PicToRtsp
 {
@@ -7,7 +21,7 @@ class PicToRtsp
     PicToRtsp();
     ~PicToRtsp();
 
-    int AvInit(int picWidth, int picHeight, std::string g_outFile);
+    int AvInit(int picWidth, int picHeight, std::string g_outFile, aclrtContext context = nullptr);
 
     void YuvDataInit();
     void BgrDataInint();
@@ -17,15 +31,33 @@ class PicToRtsp
     int FlushEncoder();
 
   private:
-    AVFormatContext   *g_fmtCtx;
-    AVCodecContext    *g_codecCtx;
-    AVStream          *g_avStream;
-    AVCodec           *g_codec;
-    AVPacket          *g_pkt;
-    AVFrame           *g_yuvFrame;
-    uint8_t           *g_yuvBuf;
+    static void VencDataCallbackStatic(void* data, uint32_t size, void* userData);
+    void VencDataCallbackImpl(void* data, uint32_t size);
+    void PushThreadFunc();
+    int PushH264Data(const H264Packet& packet);
+
+    // FFmpeg推流相关（不再用于编码）
+    AVFormatContext *g_fmtCtx;
+    AVStream        *g_avStream;
+    AVPacket        *g_pkt;
+
+    // 硬件编码器（使用全局命名空间的VideoWriter，不是cv::VideoWriter）
+    ::VideoWriter *g_videoWriter;
+    VencConfig     g_vencConfig;
+
+    // 异步推流队列
+    std::queue<H264Packet>   g_h264Queue;
+    std::mutex               g_queueMutex;
+    std::condition_variable  g_queueCond;
+    std::thread              g_pushThread;
+    std::atomic<bool>        g_pushThreadRunning;
+    uint64_t                 g_frameSeq;
+
+    // 图像格式转换相关
     AVFrame           *g_rgbFrame;
     uint8_t           *g_brgBuf;
+    AVFrame           *g_yuvFrame;
+    uint8_t           *g_yuvBuf;
     int                g_yuvSize;
     int                g_rgbSize;
     struct SwsContext *g_imgCtx;

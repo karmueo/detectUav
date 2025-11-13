@@ -58,6 +58,9 @@ enum VencStatus
     STATUS_VENC_ERROR
 };
 
+// 编码数据回调函数类型
+typedef void (*VencDataCallback)(void* data, uint32_t size, void* userData);
+
 struct VencConfig
 {
     uint32_t            maxWidth = 0;
@@ -67,6 +70,8 @@ struct VencConfig
     acldvppStreamFormat enType = H264_MAIN_LEVEL;
     aclrtContext        context = nullptr;
     aclrtRunMode        runMode = ACL_HOST;
+    VencDataCallback    dataCallback = nullptr;  // 编码数据回调
+    void*               callbackUserData = nullptr; // 回调用户数据
 };
 
 struct ImageData

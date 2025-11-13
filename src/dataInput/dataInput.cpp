@@ -40,7 +40,8 @@ DataInputThread::DataInputThread(int32_t       deviceId,
                                  string        inferName,
                                  int           postThreadNum,
                                  uint32_t      batch,
-                                 int           framesPerSecond)
+                                 int           framesPerSecond,
+                                 int           frameSkip)
     : deviceId_(deviceId),
       channelId_(channelId),
       frameCnt_(0),
@@ -59,7 +60,8 @@ DataInputThread::DataInputThread(int32_t       deviceId,
       postThreadId_(postThreadNum, INVALID_INSTANCE_ID),
       dataOutputThreadId_(INVALID_INSTANCE_ID),
       rtspDisplayThreadId_(INVALID_INSTANCE_ID),
-      framesPerSecond_(framesPerSecond)
+      framesPerSecond_(framesPerSecond),
+      frameSkip_(frameSkip < 1 ? 1 : frameSkip)  // 至少为1,不跳帧
 {
 }
 
@@ -187,6 +189,9 @@ AclLiteError DataInputThread::Init()
     int oneSecond = 1000;
     lastDecodeTime_ = 0;
     waitTime_ = oneSecond / framesPerSecond_;
+    
+    ACLLITE_LOG_INFO("DataInputThread initialized: frameSkip=%d (process 1 frame per %d frames)", 
+                     frameSkip_, frameSkip_);
 
     return ACLLITE_OK;
 }
@@ -211,16 +216,15 @@ AclLiteError DataInputThread::Process(int msgId, shared_ptr<void> msgData)
         break;
     }
     
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-    if (msgId == MSG_READ_FRAME) {
-        static int logCount = 0;
-        if (++logCount % 30 == 0) {
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        if (frameCnt_ % 30 == 0)
+        {
             ACLLITE_LOG_INFO("[DataInputThread] Process time: %ld ms", duration);
-        }
-    }
-
-    return ACLLITE_OK;
+            // 每30帧打印一次所有线程的队列状态
+            AclLiteApp &app = GetAclLiteAppInstance();
+            app.PrintQueueStatus();
+        }    return ACLLITE_OK;
 }
 
 AclLiteError DataInputThread::AppStart()
@@ -286,6 +290,24 @@ DataInputThread::ReadStream(shared_ptr<DetectDataMsg> &detectDataMsg)
 
     AclLiteError ret = ACLLITE_OK;
     ImageData    decodedImg;
+
+    // 跳帧逻辑:跳过frameSkip_-1帧
+    for (int i = 0; i < frameSkip_ - 1; i++)
+    {
+        ImageData skipFrame;
+        ret = cap_->Read(skipFrame);
+        if (ret == ACLLITE_ERROR_DECODE_FINISH)
+        {
+            detectDataMsg->isLastFrame = true;
+            return ACLLITE_ERROR_DECODE_FINISH;
+        }
+        else if (ret != ACLLITE_OK)
+        {
+            detectDataMsg->isLastFrame = true;
+            ACLLITE_LOG_ERROR("Read frame failed during skip, error %d", ret);
+            return ACLLITE_ERROR;
+        }
+    }
 
     while (realWaitTime_ < waitTime_)
     {

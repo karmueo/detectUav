@@ -41,14 +41,12 @@
 #include <memory>
 #include <sys/prctl.h>
 #include <sys/time.h>
-#include <thread>
 #include <unistd.h>
 
 using namespace std;
 
 VideoWriter::VideoWriter(VencConfig &vencConfig, aclrtContext context)
-    : isReleased_(false), status_(STATUS_VENC_INIT), context_(context),
-      dvppVenc_(nullptr), vencInfo_(vencConfig)
+    : isReleased_(false), status_(STATUS_VENC_INIT), context_(context), dvppVenc_(nullptr), vencInfo_(vencConfig)
 {
 }
 
@@ -145,9 +143,7 @@ AclLiteError VideoWriter::Set(StreamProperty key, int value)
     default:
         ret = ACLLITE_ERROR_UNSURPPORT_PROPERTY;
         string outvideo = vencInfo_.outFile;
-        ACLLITE_LOG_ERROR("Unsurpport property %d to set for video %s",
-                          (int)key,
-                          outvideo.c_str());
+        ACLLITE_LOG_ERROR("Unsurpport property %d to set for video %s", (int)key, outvideo.c_str());
         break;
     }
 
@@ -197,8 +193,7 @@ AclLiteError VideoWriter::Close()
 
 AclLiteError VideoWriter::SetImageFormat(uint32_t format)
 {
-    if ((format != PIXEL_FORMAT_YUV_SEMIPLANAR_420) ||
-        (format != PIXEL_FORMAT_YVU_SEMIPLANAR_420))
+    if ((format != PIXEL_FORMAT_YUV_SEMIPLANAR_420) || (format != PIXEL_FORMAT_YVU_SEMIPLANAR_420))
     {
         ACLLITE_LOG_ERROR(
             "Set video encoded image format to %d failed, "
@@ -217,20 +212,21 @@ AclLiteError VideoWriter::SetImageFormat(uint32_t format)
 
 AclLiteError VideoWriter::SetStreamFormat(uint32_t format)
 {
-    if ((format != H265_MAIN_LEVEL) || (format != H264_MAIN_LEVEL) ||
-        (format != H264_HIGH_LEVEL) || (format != H264_BASELINE_LEVEL))
+    if ((format != H265_MAIN_LEVEL) || (format != H264_MAIN_LEVEL) || (format != H264_HIGH_LEVEL) ||
+        (format != H264_BASELINE_LEVEL))
     {
-        ACLLITE_LOG_ERROR("Set video stream format to %d failed, "
-                          "only support "
-                          "%d(H265 MP), "
-                          "%d(H264 BP), "
-                          "%d(H264 MP) and"
-                          "%d(H264 HP)",
-                          format,
-                          (int)H265_MAIN_LEVEL,
-                          (int)H264_BASELINE_LEVEL,
-                          (int)H264_MAIN_LEVEL,
-                          (int)H264_HIGH_LEVEL);
+        ACLLITE_LOG_ERROR(
+            "Set video stream format to %d failed, "
+            "only support "
+            "%d(H265 MP), "
+            "%d(H264 BP), "
+            "%d(H264 MP) and"
+            "%d(H264 HP)",
+            format,
+            (int)H265_MAIN_LEVEL,
+            (int)H264_BASELINE_LEVEL,
+            (int)H264_MAIN_LEVEL,
+            (int)H264_HIGH_LEVEL);
         return ACLLITE_ERROR;
     }
     vencInfo_.enType = (acldvppStreamFormat)format;

@@ -63,6 +63,7 @@ class AclLiteApp
     AclLiteError SendMessage(int dest, int msgId, std::shared_ptr<void> data);
     void         WaitEnd() { waitEnd_ = true; }
     void         Exit();
+    void         PrintQueueStatus();
 
   private:
     AclLiteError Init();

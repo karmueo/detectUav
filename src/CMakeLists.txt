@@ -60,7 +60,6 @@ add_executable(main
         dataOutput/dataOutput.cpp
 	    pushrtsp/pictortsp.cpp
         pushrtsp/pushrtspthread.cpp
-        pushrtsp/venc_process.cpp
         main.cpp)
 
 target_sources(main 

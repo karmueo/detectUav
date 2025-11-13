@@ -20,7 +20,6 @@
 #include "AclLiteApp.h"
 #include "AclLiteResource.h"
 #include "AclLiteThread.h"
-#include "AclLiteType.h"
 #include "AclLiteUtils.h"
 #include "Params.h"
 #include "dataInput/dataInput.h"
@@ -34,7 +33,6 @@
 #include <fstream>
 #include <iostream>
 #include <json/json.h>
-#include <map>
 
 using namespace std;
 namespace
@@ -298,7 +296,7 @@ void StartApp(AclLiteResource &aclDev)
 int main(int argc, char *argv[])
 {
     // Check input args: the path of configure json
-    if ((argc != argNum) || (argv[1] == nullptr))
+    if ((argc != static_cast<int>(argNum)) || (argv[1] == nullptr))
     {
         ACLLITE_LOG_ERROR("Please input: ./main <json_dir>");
         return ACLLITE_ERROR;

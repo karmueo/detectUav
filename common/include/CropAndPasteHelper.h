@@ -23,6 +23,8 @@
 
 #include "acl/acl.h"
 #include "acl/ops/acl_dvpp.h"
+#include "AclLiteError.h"
+#include "AclLiteType.h"
 
 class CropAndPasteHelper
 {

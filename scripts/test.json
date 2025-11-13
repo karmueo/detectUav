@@ -5,15 +5,15 @@
             "model_config":[
                 {
                     "infer_thread_name":"infer_thread_0",
-                    "model_path":"../model/yolov7x.om",
+                    "model_path":"./model/yolov11n_bird_uav_bs1.om",
                     "model_width":640,
                     "model_heigth":640,
                     "io_info":[
                         {
-                            "input_path":"../data/car0.mp4",
+                            "input_path":"./data/06-19-17h28m36s.mp4",
                             "input_type":"video",
-                            "output_path":"../out/outcar0.mp4",
-                            "output_type":"video",
+                            "output_path":"rtsp://192.168.1.80/live/uav",
+                            "output_type":"rtsp",
                             "channel_id":0
                         }
                     ]

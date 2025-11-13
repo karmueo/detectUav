@@ -18,12 +18,10 @@
 */
 #include "detectInference.h"
 #include "AclLiteApp.h"
+#include <chrono>
 #include "AclLiteModel.h"
 #include "Params.h"
-#include "acl/acl.h"
-#include <algorithm>
 #include <cmath>
-#include <iostream>
 #include <sys/timeb.h>
 
 using namespace std;
@@ -110,6 +108,8 @@ DetectInferenceThread::MsgSend(shared_ptr<DetectDataMsg> detectDataMsg)
 
 AclLiteError DetectInferenceThread::Process(int msgId, shared_ptr<void> data)
 {
+    auto start = std::chrono::high_resolution_clock::now();
+    
     switch (msgId)
     {
     case MSG_DO_DETECT_INFER:
@@ -119,6 +119,15 @@ AclLiteError DetectInferenceThread::Process(int msgId, shared_ptr<void> data)
     default:
         ACLLITE_LOG_INFO("Inference thread ignore msg %d", msgId);
         break;
+    }
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    if (msgId == MSG_DO_DETECT_INFER) {
+        static int logCount = 0;
+        if (++logCount % 30 == 0) {
+            ACLLITE_LOG_INFO("[DetectInferenceThread] Process time: %ld ms", duration);
+        }
     }
 
     return ACLLITE_OK;

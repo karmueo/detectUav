@@ -24,8 +24,6 @@
 #include "AclLiteThread.h"
 #include "Params.h"
 #include "VideoCapture.h"
-#include "acl/acl.h"
-#include <iostream>
 #include <mutex>
 #include <unistd.h>
 

@@ -1,27 +1,10 @@
-/**
-* Copyright (c) Huawei Technologies Co., Ltd. 2020-2022. All rights reserved.
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-
-* http://www.apache.org/licenses/LICENSE-2.0
-
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-
-* File sample_process.cpp
-* Description: handle acl resource
-*/
 #include "detectPostprocess.h"
 #include "AclLiteApp.h"
+#include <chrono>
 #include "AclLiteUtils.h"
 #include "Params.h"
-#include "acl/acl.h"
 #include "label.h"
+#include <cstddef>
 #include <iostream>
 
 using namespace std;
@@ -37,6 +20,10 @@ const vector<cv::Scalar> kColors{cv::Scalar(237, 149, 100),
                                  cv::Scalar(0, 215, 255),
                                  cv::Scalar(50, 205, 50),
                                  cv::Scalar(139, 85, 26)};
+const uint32_t           kNumPredictions = 8400;
+const float              kConfThresh = 0.25f;
+const float              kNmsThresh = 0.45f;
+const uint32_t           kNumClasses = 2;
 typedef struct BoundBox
 {
     float  x;
@@ -55,8 +42,11 @@ DetectPostprocessThread::DetectPostprocessThread(uint32_t      modelWidth,
                                                  uint32_t      modelHeight,
                                                  aclrtRunMode &runMode,
                                                  uint32_t      batch)
-    : modelWidth_(modelWidth), modelHeight_(modelHeight), runMode_(runMode),
-      sendLastBatch_(false), batch_(batch)
+    : modelWidth_(modelWidth),
+      modelHeight_(modelHeight),
+      runMode_(runMode),
+      sendLastBatch_(false),
+      batch_(batch)
 {
 }
 
@@ -66,6 +56,8 @@ AclLiteError DetectPostprocessThread::Init() { return ACLLITE_OK; }
 
 AclLiteError DetectPostprocessThread::Process(int msgId, shared_ptr<void> data)
 {
+    auto start = std::chrono::high_resolution_clock::now();
+    
     AclLiteError ret = ACLLITE_OK;
     switch (msgId)
     {
@@ -78,6 +70,15 @@ AclLiteError DetectPostprocessThread::Process(int msgId, shared_ptr<void> data)
                          msgId);
         break;
     }
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    if (msgId == MSG_POSTPROC_DETECTDATA) {
+        static int logCount = 0;
+        if (++logCount % 30 == 0) {
+            ACLLITE_LOG_INFO("[DetectPostprocessThread] Process time: %ld ms", duration);
+        }
+    }
 
     return ret;
 }
@@ -86,10 +87,10 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
     shared_ptr<DetectDataMsg> detectDataMsg)
 {
     size_t pos = 0;
-    for (int n = 0; n < detectDataMsg->decodedImg.size(); n++)
+    for (size_t n = 0; n < detectDataMsg->decodedImg.size(); n++)
     {
         void *dataBuffer =
-            CopyDataToHost(detectDataMsg->inferenceOutput[0].data.get() + pos,
+            CopyDataToHost((char*)detectDataMsg->inferenceOutput[0].data.get() + pos,
                            detectDataMsg->inferenceOutput[0].size / batch_,
                            runMode_,
                            MEMORY_NORMAL);
@@ -101,84 +102,97 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
         pos = pos + detectDataMsg->inferenceOutput[0].size / batch_;
         float *detectBuff = static_cast<float *>(dataBuffer);
 
-        // confidence threshold
-        float confidenceThreshold = 0.25;
-
-        // class number
-        size_t classNum = 80;
-
-        // number of (x, y, width, hight, confidence)
-        size_t offset = 5;
-
-        // total number = class number + (x, y, width, hight, confidence)
-        size_t totalNumber = classNum + offset;
-
-        // total number of boxs
-        size_t modelOutputBoxNum = 25200;
-
-        // top 5 indexes correspond (x, y, width, hight, confidence),
-        // and 5~85 indexes correspond object's confidence
-        size_t startIndex = 5;
+        // YOLOv7 model output: [batch, 6, 8400]
+        // 6 channels: cx, cy, w, h, conf_class0, conf_class1
 
         // get srcImage width height
         int srcWidth = detectDataMsg->decodedImg[n].width;
         int srcHeight = detectDataMsg->decodedImg[n].height;
 
+        // Calculate resize ratio (keep aspect ratio)
+        float scaleWidth = (float)modelWidth_ / srcWidth;
+        float scaleHeight = (float)modelHeight_ / srcHeight;
+        float resizeRatio = min(scaleWidth, scaleHeight);
+        
+        // Calculate the actual resized dimensions
+        float resizedWidth = srcWidth * resizeRatio;
+        float resizedHeight = srcHeight * resizeRatio;
+        
+        // Calculate padding offset (image is centered in model input)
+        float padLeft = (modelWidth_ - resizedWidth) / 2.0f;
+        float padTop = (modelHeight_ - resizedHeight) / 2.0f;
+
         // filter boxes by confidence threshold
         vector<BoundBox> boxes;
-        size_t           yIndex = 1;
-        size_t           widthIndex = 2;
-        size_t           heightIndex = 3;
-        size_t           classConfidenceIndex = 4;
-        for (size_t i = 0; i < modelOutputBoxNum; ++i)
+        
+        for (uint32_t i = 0; i < kNumPredictions; ++i)
         {
-            float maxValue = 0;
-            float maxIndex = 0;
-            for (size_t j = startIndex; j < totalNumber; ++j)
-            {
-                float value =
-                    detectBuff[i * totalNumber + j] *
-                    detectBuff[i * totalNumber + classConfidenceIndex];
-                if (value > maxValue)
-                {
-                    // index of class
-                    maxIndex = j - startIndex;
-                    maxValue = value;
-                }
-            }
-            float classConfidence =
-                detectBuff[i * totalNumber + classConfidenceIndex];
-            if (classConfidence >= confidenceThreshold)
-            {
-                // index of object's confidence
-                size_t index = i * totalNumber + maxIndex + startIndex;
+            // Extract center coordinates and dimensions (in model input image size)
+            float cx = detectBuff[0 * kNumPredictions + i];
+            float cy = detectBuff[1 * kNumPredictions + i];
+            float w = detectBuff[2 * kNumPredictions + i];
+            float h = detectBuff[3 * kNumPredictions + i];
 
-                // finalConfidence = class confidence * object's confidence
-                float    finalConfidence = classConfidence * detectBuff[index];
-                BoundBox box;
-                box.x = detectBuff[i * totalNumber] * srcWidth / modelWidth_;
-                box.y = detectBuff[i * totalNumber + yIndex] * srcHeight /
-                        modelHeight_;
-                box.width = detectBuff[i * totalNumber + widthIndex] *
-                            srcWidth / modelWidth_;
-                box.height = detectBuff[i * totalNumber + heightIndex] *
-                             srcHeight / modelHeight_;
-                box.score = finalConfidence;
-                box.classIndex = maxIndex;
-                box.index = i;
-                if (maxIndex < classNum)
-                {
-                    boxes.push_back(box);
-                }
+            // Extract confidence scores for two classes
+            float conf0 = detectBuff[4 * kNumPredictions + i];
+            float conf1 = detectBuff[5 * kNumPredictions + i];
+
+            // Select the class with higher confidence
+            float score;
+            uint32_t cls;
+            if (conf0 > conf1)
+            {
+                score = conf0;
+                cls = 0;
+            }
+            else
+            {
+                score = conf1;
+                cls = 1;
+            }
+
+            // Filter by confidence threshold
+            if (score <= kConfThresh)
+                continue;
+
+            // Convert center coordinates to corner coordinates in model input size
+            float x1 = cx - w / 2.0f;
+            float y1 = cy - h / 2.0f;
+            float x2 = cx + w / 2.0f;
+            float y2 = cy + h / 2.0f;
+
+            // Remove padding offset first, then scale to original image size
+            x1 = (x1 - padLeft) / resizeRatio;
+            y1 = (y1 - padTop) / resizeRatio;
+            x2 = (x2 - padLeft) / resizeRatio;
+            y2 = (y2 - padTop) / resizeRatio;
+
+            // Clip coordinates to valid range
+            x1 = max(0.0f, min(x1, (float)(srcWidth - 1)));
+            y1 = max(0.0f, min(y1, (float)(srcHeight - 1)));
+            x2 = max(0.0f, min(x2, (float)(srcWidth - 1)));
+            y2 = max(0.0f, min(y2, (float)(srcHeight - 1)));
+
+            // Convert to center coordinates and size for BoundBox
+            BoundBox box;
+            box.x = (x1 + x2) / 2.0f;
+            box.y = (y1 + y2) / 2.0f;
+            box.width = x2 - x1;
+            box.height = y2 - y1;
+            box.score = score;
+            box.classIndex = cls;
+            box.index = i;
+            
+            if (cls < kNumClasses)
+            {
+                boxes.push_back(box);
             }
         }
 
         // filter boxes by NMS
         vector<BoundBox> result;
         result.clear();
-        float   NMSThreshold = 0.45;
-        int32_t maxLength =
-            modelWidth_ > modelHeight_ ? modelWidth_ : modelHeight_;
+        int32_t maxLength = srcWidth > srcHeight ? srcWidth : srcHeight;
         std::sort(boxes.begin(), boxes.end(), sortScore);
         BoundBox boxMax;
         BoundBox boxCompare;
@@ -227,7 +241,7 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
                             boxCompare.width * boxCompare.height - area);
 
                 // filter boxes by NMS threshold
-                if (iou > NMSThreshold)
+                if (iou > kNmsThresh)
                 {
                     boxes.erase(boxes.begin() + index);
                     continue;

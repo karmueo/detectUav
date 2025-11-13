@@ -23,10 +23,10 @@
 #include "AclLiteImageProc.h"
 #include "AclLiteModel.h"
 #include "AclLiteType.h"
-#include "X11/Xlib.h"
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/imgproc/types_c.h"
 #include "opencv2/opencv.hpp"
+#include "X11/Xlib.h"
 #include <iostream>
 #include <memory>
 #include <mutex>

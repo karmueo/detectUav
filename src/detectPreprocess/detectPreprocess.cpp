@@ -1,25 +1,7 @@
-/**
-* Copyright (c) Huawei Technologies Co., Ltd. 2020-2022. All rights reserved.
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-
-* http://www.apache.org/licenses/LICENSE-2.0
-
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-
-* File sample_process.cpp
-* Description: handle acl resource
-*/
 #include "detectPreprocess.h"
 #include "AclLiteApp.h"
+#include <chrono>
 #include "Params.h"
-#include <iostream>
 #include <sys/timeb.h>
 
 using namespace std;
@@ -32,7 +14,9 @@ const uint32_t kSleepTime = 500;
 DetectPreprocessThread::DetectPreprocessThread(uint32_t modelWidth,
                                                uint32_t modelHeight,
                                                uint32_t batch)
-    : modelWidth_(modelWidth), modelHeight_(modelHeight), isReleased(false),
+    : modelWidth_(modelWidth),
+      modelHeight_(modelHeight),
+      isReleased(false),
       batch_(batch)
 {
 }
@@ -60,6 +44,8 @@ AclLiteError DetectPreprocessThread::Init()
 
 AclLiteError DetectPreprocessThread::Process(int msgId, shared_ptr<void> data)
 {
+    auto start = std::chrono::high_resolution_clock::now();
+    
     switch (msgId)
     {
     case MSG_PREPROC_DETECTDATA:
@@ -69,6 +55,15 @@ AclLiteError DetectPreprocessThread::Process(int msgId, shared_ptr<void> data)
     default:
         ACLLITE_LOG_INFO("Detect Preprocess thread ignore msg %d", msgId);
         break;
+    }
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    if (msgId == MSG_PREPROC_DETECTDATA) {
+        static int logCount = 0;
+        if (++logCount % 30 == 0) {
+            ACLLITE_LOG_INFO("[DetectPreprocessThread] Process time: %ld ms", duration);
+        }
     }
 
     return ACLLITE_OK;

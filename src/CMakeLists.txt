@@ -45,7 +45,9 @@ include_directories(
 )
 
 # add host lib path
+# 优先使用指定的FFmpeg库路径
 link_directories(
+        $ENV{SYSROOT}/usr/local/Ascend/thirdpart/aarch64/lib
         ${INC_PATH}/runtime/lib64/stub
         ${INC_PATH}/thirdpart/lib
 )
@@ -58,6 +60,7 @@ add_executable(main
         dataOutput/dataOutput.cpp
 	    pushrtsp/pictortsp.cpp
         pushrtsp/pushrtspthread.cpp
+        pushrtsp/venc_process.cpp
         main.cpp)
 
 target_sources(main 

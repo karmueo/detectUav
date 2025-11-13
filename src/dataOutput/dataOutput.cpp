@@ -17,9 +17,8 @@
 * Description: handle acl resource
 */
 #include "dataOutput.h"
-#include "acl/acl.h"
-#include "label.h"
-#include <iostream>
+#include "AclLiteApp.h"
+#include <chrono>
 #include <sys/time.h>
 
 using namespace std;
@@ -39,8 +38,11 @@ DataOutputThread::DataOutputThread(aclrtRunMode &runMode,
                                    string        outputDataType,
                                    string        outputPath,
                                    int           postThreadNum)
-    : runMode_(runMode), outputDataType_(outputDataType),
-      outputPath_(outputPath), shutdown_(0), postNum_(postThreadNum)
+    : runMode_(runMode),
+      outputDataType_(outputDataType),
+      outputPath_(outputPath),
+      shutdown_(0),
+      postNum_(postThreadNum)
 {
 }
 
@@ -85,6 +87,8 @@ AclLiteError DataOutputThread::Init()
 
 AclLiteError DataOutputThread::Process(int msgId, shared_ptr<void> data)
 {
+    auto start = std::chrono::high_resolution_clock::now();
+    
     AclLiteError ret = ACLLITE_OK;
     switch (msgId)
     {
@@ -103,6 +107,15 @@ AclLiteError DataOutputThread::Process(int msgId, shared_ptr<void> data)
         ACLLITE_LOG_INFO("Detect PostprocessThread thread ignore msg %d",
                          msgId);
         break;
+    }
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    if (msgId == MSG_OUTPUT_FRAME) {
+        static int logCount = 0;
+        if (++logCount % 30 == 0) {
+            ACLLITE_LOG_INFO("[DataOutputThread] Process time: %ld ms", duration);
+        }
     }
 
     return ret;

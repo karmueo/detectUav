@@ -20,13 +20,9 @@
 #define DETECTINFERENCETHREAD_H
 #pragma once
 
-#include "AclLiteImageProc.h"
 #include "AclLiteModel.h"
 #include "AclLiteThread.h"
 #include "Params.h"
-#include "acl/acl.h"
-#include <iostream>
-#include <mutex>
 #include <unistd.h>
 
 /**

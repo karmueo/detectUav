@@ -18,7 +18,7 @@
 */
 #include "dataInput.h"
 #include "Params.h"
-#include <iostream>
+#include <chrono>
 #include <sys/time.h>
 
 namespace
@@ -28,6 +28,7 @@ const uint32_t kYuvDivisor = 2;
 const uint32_t kSleepTime = 500;
 const uint32_t kOneSec = 1000000;
 const uint32_t kOneMSec = 1000;
+const uint32_t kTargetFPS = 25;  // 目标帧率,控制输入速度
 } // namespace
 using namespace std;
 
@@ -40,20 +41,26 @@ DataInputThread::DataInputThread(int32_t       deviceId,
                                  int           postThreadNum,
                                  uint32_t      batch,
                                  int           framesPerSecond)
-    : deviceId_(deviceId), channelId_(channelId), runMode_(runMode),
-      postproId_(0), inputDataType_(inputDataType),
-      inputDataPath_(inputDataPath), inferName_(inferName), cap_(nullptr),
-      frameCnt_(0), postThreadNum_(postThreadNum),
-      selfThreadId_(INVALID_INSTANCE_ID), preThreadId_(INVALID_INSTANCE_ID),
+    : deviceId_(deviceId),
+      channelId_(channelId),
+      frameCnt_(0),
+      msgNum_(0),
+      batch_(batch),
+      inputDataType_(inputDataType),
+      inputDataPath_(inputDataPath),
+      inferName_(inferName),
+      postThreadNum_(postThreadNum),
+      postproId_(0),
+      runMode_(runMode),
+      cap_(nullptr),
+      selfThreadId_(INVALID_INSTANCE_ID),
+      preThreadId_(INVALID_INSTANCE_ID),
       inferThreadId_(INVALID_INSTANCE_ID),
+      postThreadId_(postThreadNum, INVALID_INSTANCE_ID),
       dataOutputThreadId_(INVALID_INSTANCE_ID),
-      rtspDisplayThreadId_(INVALID_INSTANCE_ID), batch_(batch),
-      framesPerSecond_(framesPerSecond), msgNum_(0)
+      rtspDisplayThreadId_(INVALID_INSTANCE_ID),
+      framesPerSecond_(framesPerSecond)
 {
-    for (int i = 0; i < postThreadNum; i++)
-    {
-        postThreadId_.push_back(INVALID_INSTANCE_ID);
-    }
 }
 
 DataInputThread::~DataInputThread()
@@ -143,6 +150,7 @@ AclLiteError DataInputThread::Init()
         }
     }
     // Get the relevant thread instance id
+    // 获取相关线程实例id
     selfThreadId_ = SelfInstanceId();
     inferThreadId_ = GetAclLiteThreadIdByName(inferName_);
     preThreadId_ = GetAclLiteThreadIdByName(kPreName + to_string(channelId_));
@@ -185,6 +193,8 @@ AclLiteError DataInputThread::Init()
 
 AclLiteError DataInputThread::Process(int msgId, shared_ptr<void> msgData)
 {
+    auto start = std::chrono::high_resolution_clock::now();
+    
     shared_ptr<DetectDataMsg> detectDataMsg = make_shared<DetectDataMsg>();
     switch (msgId)
     {
@@ -199,6 +209,15 @@ AclLiteError DataInputThread::Process(int msgId, shared_ptr<void> msgData)
         ACLLITE_LOG_ERROR("Detect Preprocess thread receive unknow msg %d",
                           msgId);
         break;
+    }
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    if (msgId == MSG_READ_FRAME) {
+        static int logCount = 0;
+        if (++logCount % 30 == 0) {
+            ACLLITE_LOG_INFO("[DataInputThread] Process time: %ld ms", duration);
+        }
     }
 
     return ACLLITE_OK;
@@ -388,6 +407,7 @@ AclLiteError DataInputThread::MsgRead(shared_ptr<DetectDataMsg> &detectDataMsg)
 AclLiteError DataInputThread::MsgSend(shared_ptr<DetectDataMsg> &detectDataMsg)
 {
     AclLiteError ret;
+    
     if (detectDataMsg->isLastFrame == false)
     {
         while (1)

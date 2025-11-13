@@ -1,3 +1,3 @@
 #!/bin/bash
 # cd ../
-gdbserver :1234 main
+gdbserver :1234 main test.json

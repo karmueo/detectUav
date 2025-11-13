@@ -1,9 +1,7 @@
 #pragma once
 #include "AclLiteThread.h"
 #include "Params.h"
-#include "acl/acl.h"
 #include "pictortsp.h"
-#include <iostream>
 #include <sys/timeb.h>
 
 class PushRtspThread : public AclLiteThread

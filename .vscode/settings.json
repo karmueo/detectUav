@@ -1,0 +1,24 @@
+{
+    "cmake.configureArgs": [
+        "-DCMAKE_TOOLCHAIN_FILE=${workspaceFolder}/cmake/toolchain-aarch64-ascend.cmake",
+    ],
+    "cmake.configureSettings": {
+        "CPU_ARCH": "aarch64",
+        "THIRDPART_PATH": "/opt/ascend/sysroot/usr/local/Ascend/thirdpart/aarch64",
+        "INSTALL_DIR": "/opt/ascend/sysroot/usr/local/Ascend/ascend-toolkit/latest",
+        "SYSROOT": "/opt/ascend/sysroot",
+    },
+    "cmake.environment": {
+        "CPU_ARCH": "aarch64",
+        "THIRDPART_PATH": "/opt/ascend/sysroot/usr/local/Ascend/thirdpart/aarch64",
+        "INSTALL_DIR": "/opt/ascend/sysroot/usr/local/Ascend/ascend-toolkit/latest/aarch64-linux",
+        "SYSROOT": "/opt/ascend/sysroot",
+        "DDK_PATH": "/opt/ascend/sysroot/usr/local/Ascend/ascend-toolkit/latest",
+        "NPU_HOST_LIB": "/opt/ascend/sysroot/usr/local/Ascend/ascend-toolkit/latest/runtime/lib64/stub"
+    },
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "clangd.arguments": [
+        "--compile-commands-dir=build",
+        "--query-driver=/usr/bin/aarch64-linux-gnu-*"
+    ]
+}

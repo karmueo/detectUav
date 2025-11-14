@@ -66,6 +66,8 @@ class VencHelper
     void       SetStatus(VencStatus status) { status_ = status; }
     void       DestroyResource();
     VencStatus GetStatus() { return status_; }
+    // 获取待编码输入队列大小（frameImageQueue_）
+    uint32_t   GetFrameQueueSize() { return frameImageQueue_.Size(); }
 
   private:
     static void                AsyncVencThreadEntry(void *arg);
@@ -75,7 +77,7 @@ class VencHelper
     VencConfig                                  vencInfo_;
     VencStatus                                  status_;
     DvppVenc                                   *vencProc_;
-    ThreadSafeQueue<std::shared_ptr<ImageData>> frameImageQueue_;
+    ThreadSafeQueue<std::shared_ptr<ImageData>> frameImageQueue_;  // 待编码输入队列
 };
 
 #endif

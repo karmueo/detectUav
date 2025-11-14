@@ -191,6 +191,11 @@ AclLiteError VideoWriter::Close()
     return ACLLITE_OK;
 }
 
+uint32_t VideoWriter::GetInputQueueSize()
+{
+    return (dvppVenc_ != nullptr) ? dvppVenc_->GetFrameQueueSize() : 0;
+}
+
 AclLiteError VideoWriter::SetImageFormat(uint32_t format)
 {
     if ((format != PIXEL_FORMAT_YUV_SEMIPLANAR_420) || (format != PIXEL_FORMAT_YVU_SEMIPLANAR_420))

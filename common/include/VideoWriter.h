@@ -67,6 +67,9 @@ class VideoWriter : public AclLiteVideoCapBase
     AclLiteError Open();
     void         DestroyResource();
 
+    // 获取底层编码输入队列大小（由VencHelper维护）
+    uint32_t     GetInputQueueSize();
+
   private:
     AclLiteError InitResource();
     AclLiteError SetImageFormat(uint32_t format);

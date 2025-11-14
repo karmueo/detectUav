@@ -394,7 +394,6 @@ DataInputThread::GetOneFrame(shared_ptr<DetectDataMsg> &detectDataMsg)
 
 AclLiteError DataInputThread::MsgRead(shared_ptr<DetectDataMsg> &detectDataMsg)
 {
-    AclLiteError ret;
     postproId_ = msgNum_ % postThreadNum_;
     detectDataMsg->isLastFrame = false;
     detectDataMsg->detectPreThreadId = preThreadId_;

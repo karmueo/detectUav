@@ -159,7 +159,8 @@ int PicToRtsp::AvInit(int picWidth, int picHeight, std::string g_outFile, aclrtC
     return ACLLITE_OK;
 }
 
-// 静态回调函数，由VencHelper调用
+// 静态回调函数，由VencHelper.cpp中的DvppVenc::SaveVencFile调用
+// NOTE: data指向编码后的H264数据
 void PicToRtsp::VencDataCallbackStatic(void* data, uint32_t size, void* userData)
 {
     PicToRtsp* instance = static_cast<PicToRtsp*>(userData);
@@ -332,6 +333,54 @@ int PicToRtsp::YuvDataToRtsp(void *dataBuf, uint32_t size, uint32_t seq)
     return ACLLITE_OK;
 }
 
+// 直接使用传入的 YUV ImageData 进行编码推流（无需尺寸与格式转换）
+int PicToRtsp::ImageDataToRtsp(ImageData& imageData, uint32_t seq)
+{
+    static int  pushCount = 0;
+    static long totalEncodeTime = 0;
+    pushCount++;
+
+    auto start = std::chrono::high_resolution_clock::now();
+
+    if (g_videoWriter == nullptr)
+    {
+        ACLLITE_LOG_ERROR("Hardware encoder not initialized");
+        return ACLLITE_ERROR;
+    }
+
+    // 直接将传入的 ImageData 送入硬件编码器
+    AclLiteError ret = g_videoWriter->Read(imageData);
+    if (ret != ACLLITE_OK)
+    {
+        ACLLITE_LOG_ERROR("Hardware encode YUV(ImageData) failed");
+        return ACLLITE_ERROR;
+    }
+
+    auto end = std::chrono::high_resolution_clock::now();
+    totalEncodeTime += std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+
+    // 周期性打印队列状态，保持与 BgrDataToRtsp 一致的可观测性
+    if (pushCount % 30 == 0)
+    {
+        size_t queueSize = 0;
+        {
+            std::lock_guard<std::mutex> lock(g_queueMutex);
+            queueSize = g_h264Queue.size();
+        }
+        uint32_t vencInputQueueSize = (g_videoWriter != nullptr) ? g_videoWriter->GetInputQueueSize() : 0;
+
+        ACLLITE_LOG_INFO(
+            "[ImageDataToRtsp] Avg (us): hw_encode=%.1f, h264Queue=%zu, vencInputQueue=%u",
+            totalEncodeTime / 30.0,
+            queueSize,
+            vencInputQueueSize);
+        totalEncodeTime = 0;
+    }
+
+    // 编码完成后，回调函数会自动被调用并推流
+    return ACLLITE_OK;
+}
+
 void PicToRtsp::BgrDataInint()
 {
     if (this->g_bgrToRtspFlag == false)
@@ -385,6 +434,7 @@ void PicToRtsp::BgrDataInint()
     }
 }
 
+// FIXME: 速度瓶颈
 int PicToRtsp::BgrDataToRtsp(void *dataBuf, uint32_t size, uint32_t seq)
 {
     static int  pushCount = 0;
@@ -446,17 +496,34 @@ int PicToRtsp::BgrDataToRtsp(void *dataBuf, uint32_t size, uint32_t seq)
             std::lock_guard<std::mutex> lock(g_queueMutex);
             queueSize = g_h264Queue.size();
         }
-        
+        // 获取待编码输入队列大小
+        uint32_t vencInputQueueSize = (g_videoWriter != nullptr) ? g_videoWriter->GetInputQueueSize() : 0;
+
         auto endTotal = std::chrono::high_resolution_clock::now();
         auto totalTime = std::chrono::duration_cast<std::chrono::microseconds>(endTotal - startTotal).count();
         ACLLITE_LOG_INFO(
-            "[BgrDataToRtsp] Avg times (us): bgr2yuv=%.1f, hw_encode=%.1f, total=%.1f, queueSize=%zu",
+            "[BgrDataToRtsp] Avg (us): bgr2yuv=%.1f, hw_encode=%.1f, total=%.1f, h264Queue=%zu, vencInputQueue=%u",
             totalConvertTime / 30.0,
             totalEncodeTime / 30.0,
             totalTime / 1.0,
-            queueSize);
+            queueSize,
+            vencInputQueueSize);
         totalConvertTime = totalEncodeTime = 0;
     }
 
     return ACLLITE_OK;
+}
+
+void PicToRtsp::PrintEncodeQueuesStatus()
+{
+    size_t h264Size = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_queueMutex);
+        h264Size = g_h264Queue.size();
+    }
+    uint32_t vencInputQueueSize = (g_videoWriter != nullptr) ? g_videoWriter->GetInputQueueSize() : 0;
+    ACLLITE_LOG_INFO("========== Encode Queue Status ==========");
+    ACLLITE_LOG_INFO("  [PicToRtsp] H264 output queue: %zu", h264Size);
+    ACLLITE_LOG_INFO("  [VencHelper] Input frame queue: %u", vencInputQueueSize);
+    ACLLITE_LOG_INFO("=========================================");
 }

@@ -1,6 +1,7 @@
 #include "pushrtspthread.h"
 #include "AclLiteApp.h"
 #include <chrono>
+#include <cstddef>
 using namespace cv;
 using namespace std;
 namespace
@@ -106,13 +107,15 @@ PushRtspThread::DisplayMsgProcess(std::shared_ptr<DetectDataMsg> detectDataMsg)
         av_log_set_level(AV_LOG_ERROR);
     }
     
-    for (int i = 0; i < detectDataMsg->frame.size(); i++)
+    for (size_t i = 0; i < detectDataMsg->frame.size(); i++)
     {
         // 数据已在DataOutput中resize,直接使用
-        cv::Mat &frame = detectDataMsg->frame[i];
-        g_picToRtsp.BgrDataToRtsp(frame.data,
-                                  frame.cols * frame.rows * kBgrMultiplier,
-                                  g_frameSeq);  // 使用当前序号
+        // cv::Mat &frame = detectDataMsg->frame[i];
+        // g_picToRtsp.BgrDataToRtsp(frame.data,
+        //                           frame.cols * frame.rows * kBgrMultiplier,
+        //                           g_frameSeq);  // 使用当前序号
+        ImageData imgData = detectDataMsg->decodedImg[i];
+        g_picToRtsp.ImageDataToRtsp(imgData, g_frameSeq);  // 使用当前序号
     }
     g_frameSeq++;  // 推流完成后才递增
     return ACLLITE_OK;

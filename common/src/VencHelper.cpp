@@ -63,6 +63,12 @@ AclLiteError VencHelper::Init()
                                          : ACLLITE_ERROR_VENC_STATUS;
 }
 
+/**
+ * @brief 异步视频编码线程入口函数
+ * 该函数在单独的线程中运行，负责初始化DVPP编码器并循环处理待编码的图像数据。
+ * 如果初始化失败或处理过程中出错，会设置错误状态并退出线程。
+ * @param arg 指向VencHelper对象的指针，用于访问编码配置和状态。
+ */
 void VencHelper::AsyncVencThreadEntry(void *arg)
 {
     VencHelper *thisPtr = (VencHelper *)arg;
@@ -146,17 +152,31 @@ DvppVenc::DvppVenc(VencConfig &vencInfo)
 
 DvppVenc::~DvppVenc() { DestroyResource(); }
 
+/**
+ * @brief NOTE: DVPP视频编码回调函数
+ * 该函数由DVPP编码器异步调用，用于处理编码完成后的输出流数据。
+ * 当编码成功时，将编码数据保存到文件或通过回调传递；编码失败时记录错误。
+ * 同时负责释放输入图片描述符的内存资源。
+ * @param input 指向输入图片描述符的指针，包含编码前的图像数据。
+ * @param output 指向输出流描述符的指针，包含编码后的视频流数据。
+ * @param userData 用户数据指针，指向DvppVenc对象，用于访问保存方法。
+ */
 void DvppVenc::Callback(acldvppPicDesc    *input,
                         acldvppStreamDesc *output,
                         void              *userData)
 {
+    // 从输出流描述符中获取编码后的数据指针
     void    *data = acldvppGetStreamDescData(output);
+    // 获取编码结果码，0表示成功
     uint32_t retCode = acldvppGetStreamDescRetCode(output);
     if (retCode == 0)
     {
-        // encode success, then process output pic
+        // 编码成功，处理输出数据
+        // 获取编码数据的大小
         uint32_t     size = acldvppGetStreamDescSize(output);
+        // 将userData转换为DvppVenc对象指针
         DvppVenc    *venc = (DvppVenc *)userData;
+        // 调用保存函数，将编码数据保存到文件或通过回调传递
         AclLiteError ret = venc->SaveVencFile(data, size);
         if (ret != ACLLITE_OK)
         {
@@ -165,13 +185,17 @@ void DvppVenc::Callback(acldvppPicDesc    *input,
     }
     else
     {
+        // 编码失败，记录错误码
         ACLLITE_LOG_ERROR("venc encode frame failed, ret = %u.", retCode);
     }
+    // 获取输入图片描述符中的数据指针
     void *data_input = acldvppGetPicDescData(input);
     if (data_input != nullptr)
     {
+        // 释放输入数据的设备内存
         acldvppFree(data_input);
     }
+    // 销毁输入图片描述符
     acldvppDestroyPicDesc(input);
 }
 
@@ -183,8 +207,9 @@ AclLiteError DvppVenc::SaveVencFile(void *vencData, uint32_t size)
     {
         data = CopyDataToHost(vencData, size, vencInfo_.runMode, MEMORY_NORMAL);
     }
-    
-    // 如果设置了回调函数，调用回调而不是写文件
+
+    // NOTE: 如果设置了回调函数，调用回调而不是写文件
+    // 这里调用的是pictortsp.cpp中在AvInit中定义的g_vencConfig.dataCallback = VencDataCallbackStatic
     if (vencInfo_.dataCallback != nullptr)
     {
         vencInfo_.dataCallback(data, size, vencInfo_.callbackUserData);
@@ -333,6 +358,7 @@ AclLiteError DvppVenc::CreateVencChannel()
     }
 
     aclvencSetChannelDescThreadId(vencChannelDesc_, threadId_);
+    // NOTE: dvpp使用回调函数进行编码数据处理
     aclvencSetChannelDescCallback(vencChannelDesc_, &DvppVenc::Callback);
     aclvencSetChannelDescEnType(vencChannelDesc_, vencInfo_.enType);
     aclvencSetChannelDescPicFormat(vencChannelDesc_, vencInfo_.format);

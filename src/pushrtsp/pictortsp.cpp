@@ -7,7 +7,7 @@ using namespace std;
 namespace
 {
 const string   g_avFormat = "rtsp";
-const uint16_t g_frameRate = 25; // 与实际管线更一致的帧率，减少PTS抖动
+const uint16_t g_frameRate = 25;
 } // namespace
 PicToRtsp::PicToRtsp()
 {
@@ -50,20 +50,20 @@ PicToRtsp::~PicToRtsp()
 
 int PicToRtsp::AvInit(int picWidth, int picHeight, std::string g_outFile, aclrtContext context)
 {
-    // 设置FFmpeg日志级别，只显示错误信息，隐藏调试信息
+    // 设置FFmpeg日志级别
     av_log_set_level(AV_LOG_ERROR);
 
     ACLLITE_LOG_INFO("AvInit start: URL=%s, size=%dx%d", g_outFile.c_str(), picWidth, picHeight);
 
-    // 1. 配置硬件编码器（使用回调而不是文件）
+    // 1. 配置硬件编码器
     g_vencConfig.maxWidth = picWidth;
     g_vencConfig.maxHeight = picHeight;
-    g_vencConfig.outFile = "";  // 不使用文件输出
+    g_vencConfig.outFile = "";
     g_vencConfig.format = PIXEL_FORMAT_YUV_SEMIPLANAR_420;
     g_vencConfig.enType = H264_MAIN_LEVEL;
     g_vencConfig.context = context;
-    g_vencConfig.dataCallback = VencDataCallbackStatic;  // 设置回调函数
-    g_vencConfig.callbackUserData = this;  // 传递this指针
+    g_vencConfig.dataCallback = VencDataCallbackStatic;
+    g_vencConfig.callbackUserData = this;
 
     g_videoWriter = new ::VideoWriter(g_vencConfig, context);
     AclLiteError ret = g_videoWriter->Open();
@@ -74,91 +74,100 @@ int PicToRtsp::AvInit(int picWidth, int picHeight, std::string g_outFile, aclrtC
         g_videoWriter = nullptr;
         return ACLLITE_ERROR;
     }
-    ACLLITE_LOG_INFO("Hardware encoder initialized successfully with callback");
+    ACLLITE_LOG_INFO("Hardware encoder initialized successfully");
 
-    // 2. 初始化FFmpeg网络组件用于RTSP推流
+    // 2. 初始化FFmpeg网络组件
     avformat_network_init();
-    ACLLITE_LOG_INFO("avformat_network_init completed");
 
-    // 3. 分配输出格式上下文用于RTSP推流
-    ACLLITE_LOG_INFO("Allocating output context for format: %s", g_avFormat.c_str());
+    // 3. 分配输出格式上下文
     if (avformat_alloc_output_context2(&g_fmtCtx, NULL, g_avFormat.c_str(), g_outFile.c_str()) < 0)
     {
         ACLLITE_LOG_ERROR("Cannot alloc output file context");
         return ACLLITE_ERROR;
     }
-    ACLLITE_LOG_INFO("Output context allocated successfully");
 
-    // 4. 设置RTSP传输协议为TCP
-    av_opt_set(g_fmtCtx->priv_data, "rtsp_transport", "tcp", 0);
+    // 4. 设置RTSP传输优化参数
+    AVDictionary *format_opts = NULL;
+    av_dict_set(&format_opts, "rtsp_transport", "tcp", 0);
+    av_dict_set(&format_opts, "buffer_size", "1024000", 0);      // 增大缓冲区
+    av_dict_set(&format_opts, "max_delay", "500000", 0);         // 最大延迟0.5s
+    av_dict_set(&format_opts, "rtsp_flags", "prefer_tcp", 0);
+    
+    // 将参数应用到私有数据
+    if (g_fmtCtx->priv_data) {
+        av_opt_set(g_fmtCtx->priv_data, "rtsp_transport", "tcp", 0);
+        av_opt_set(g_fmtCtx->priv_data, "buffer_size", "1024000", 0);
+    }
 
-    // 5. 创建H264视频流（不使用编码器，直接推流已编码的H264数据）
+    // 5. 创建H264视频流
     g_avStream = avformat_new_stream(g_fmtCtx, NULL);
     if (g_avStream == NULL)
     {
         ACLLITE_LOG_ERROR("failed create new video stream");
+        av_dict_free(&format_opts);
         return ACLLITE_ERROR;
     }
 
-    // 6. 设置视频流时间基准
-    g_avStream->time_base = AVRational{1, g_frameRate};
+    // 6. 设置视频流时间基准 - 使用更高精度的时间基准
+    g_avStream->time_base = AVRational{1, 90000};  // H.264标准时间基准
     g_avStream->avg_frame_rate = AVRational{g_frameRate, 1};
     g_avStream->r_frame_rate = AVRational{g_frameRate, 1};
 
-    // 7. 配置编解码器参数（用于推流，不用于编码）
+    // 7. 配置编解码器参数
     AVCodecParameters *param = g_avStream->codecpar;
     param->codec_type = AVMEDIA_TYPE_VIDEO;
     param->codec_id = AV_CODEC_ID_H264;
+    param->codec_tag = 0;  // 让FFmpeg自动选择
     param->width = picWidth;
     param->height = picHeight;
-
-    // 8. 输出格式信息到控制台
+    param->format = AV_PIX_FMT_YUV420P;
+    param->bit_rate = 4000000;  // 4Mbps码率
+    
+    // 8. 输出格式信息
     av_dump_format(g_fmtCtx, 0, g_outFile.c_str(), 1);
-
-    ACLLITE_LOG_INFO(
-        "Output format flags: 0x%x, AVFMT_NOFILE: %s",
-        g_fmtCtx->oformat->flags,
-        (g_fmtCtx->oformat->flags & AVFMT_NOFILE) ? "YES" : "NO");
 
     // 9. 打开RTSP输出流
     if (!(g_fmtCtx->oformat->flags & AVFMT_NOFILE))
     {
         ACLLITE_LOG_INFO("Opening RTSP output URL: %s", g_outFile.c_str());
-        int ret_open = avio_open2(&g_fmtCtx->pb, g_outFile.c_str(), AVIO_FLAG_WRITE, NULL, NULL);
+        int ret_open = avio_open2(&g_fmtCtx->pb, g_outFile.c_str(), AVIO_FLAG_WRITE, NULL, &format_opts);
         if (ret_open < 0)
         {
             char errbuf[AV_ERROR_MAX_STRING_SIZE];
             av_strerror(ret_open, errbuf, AV_ERROR_MAX_STRING_SIZE);
             ACLLITE_LOG_ERROR("Failed to open output URL: %s, error: %s", g_outFile.c_str(), errbuf);
+            av_dict_free(&format_opts);
             return ACLLITE_ERROR;
         }
         ACLLITE_LOG_INFO("Successfully opened RTSP output URL");
     }
+    av_dict_free(&format_opts);
 
     // 10. 写入RTSP流头
     ACLLITE_LOG_INFO("Writing format header...");
-    AVDictionary *opts = NULL;
-    int           ret_header = avformat_write_header(g_fmtCtx, &opts);
+    AVDictionary *header_opts = NULL;
+    av_dict_set(&header_opts, "rtsp_flags", "prefer_tcp", 0);
+    
+    int ret_header = avformat_write_header(g_fmtCtx, &header_opts);
     if (ret_header < 0)
     {
         char errbuf[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(ret_header, errbuf, AV_ERROR_MAX_STRING_SIZE);
         ACLLITE_LOG_ERROR("Write file header fail, error code: %d, error: %s", ret_header, errbuf);
-        if (opts)
-            av_dict_free(&opts);
+        av_dict_free(&header_opts);
         return ACLLITE_ERROR;
     }
-    if (opts)
+    av_dict_free(&header_opts);
     ACLLITE_LOG_INFO("Successfully wrote format header, RTSP stream ready");
 
-    // 11. 分配AVPacket用于推流
+    // 11. 分配AVPacket
     g_pkt = av_packet_alloc();
 
     // 12. 启动异步推流线程
     g_pushThreadRunning = true;
     g_pushThread = std::thread(&PicToRtsp::PushThreadFunc, this);
 
-    ACLLITE_LOG_INFO("RTSP stream initialization completed with async push thread");
+    ACLLITE_LOG_INFO("RTSP stream initialization completed");
     return ACLLITE_OK;
 }
 
@@ -263,10 +272,43 @@ int PicToRtsp::PushH264Data(const H264Packet& packet)
     memcpy(g_pkt->data, packet.data.data(), packet.data.size());
     g_pkt->size = packet.data.size();
     g_pkt->stream_index = g_avStream->index;
-    g_pkt->pts = packet.pts;
-    g_pkt->dts = packet.pts;
-    g_pkt->duration = 1; // 固定帧间隔=1个time_base单位
+    
+    // 正确计算时间戳：将帧序号转换为90000Hz时间基准
+    // 帧率50fps，每帧间隔 = 90000/50 = 1800 ticks
+    int64_t pts = packet.pts * (90000 / g_frameRate);
+    g_pkt->pts = pts;
+    g_pkt->dts = pts;
+    g_pkt->duration = 90000 / g_frameRate; // 每帧的持续时间
     g_pkt->pos = -1;
+    
+    // 检测并标记关键帧(I帧)：检查NAL unit type
+    // H264: NAL unit type在第一个字节的低5位
+    if (packet.data.size() >= 5)
+    {
+        // 查找起始码后的NAL unit type
+        size_t nalStart = 0;
+        if (packet.data[0] == 0 && packet.data[1] == 0)
+        {
+            if (packet.data[2] == 1)
+            {
+                nalStart = 3;
+            }
+            else if (packet.data[2] == 0 && packet.data[3] == 1)
+            {
+                nalStart = 4;
+            }
+        }
+        
+        if (nalStart > 0 && nalStart < packet.data.size())
+        {
+            uint8_t nalType = packet.data[nalStart] & 0x1F;
+            // NAL type 5 = IDR (关键帧), 7 = SPS, 8 = PPS
+            if (nalType == 5 || nalType == 7 || nalType == 8)
+            {
+                g_pkt->flags |= AV_PKT_FLAG_KEY;
+            }
+        }
+    }
 
     // 推流
     int ret = av_interleaved_write_frame(g_fmtCtx, g_pkt);

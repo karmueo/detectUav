@@ -6,8 +6,8 @@ using namespace cv;
 using namespace std;
 namespace
 {
-uint32_t kResizeWidth = 960;   // 方案1:降低分辨率以提升性能 (原1280)
-uint32_t kResizeHeight = 540;  // 方案1:降低分辨率以提升性能 (原720)
+uint32_t kResizeWidth = 1920;   // 方案1:降低分辨率以提升性能 (原1280)
+uint32_t kResizeHeight = 1080;  // 方案1:降低分辨率以提升性能 (原720)
 uint32_t kBgrMultiplier = 3;
 } // namespace
 
@@ -95,9 +95,8 @@ PushRtspThread::DisplayMsgProcess(std::shared_ptr<DetectDataMsg> detectDataMsg)
             cv::Mat &frame = detectDataMsg->frame[i];
             g_picToRtsp.BgrDataToRtsp(frame.data,
                                       frame.cols * frame.rows * kBgrMultiplier,
-                                      g_frameSeq);  // 使用当前序号
+                                      g_frameSeq++);
         }
-        g_frameSeq++;  // 推流完成后才递增
         SendMessage(
             detectDataMsg->rtspDisplayThreadId, MSG_ENCODE_FINISH, nullptr);
         return ACLLITE_OK;
@@ -106,17 +105,17 @@ PushRtspThread::DisplayMsgProcess(std::shared_ptr<DetectDataMsg> detectDataMsg)
     {
         av_log_set_level(AV_LOG_ERROR);
     }
-    
+
+    // NOTE: 发送YUV数据进行编码推流
     for (size_t i = 0; i < detectDataMsg->frame.size(); i++)
     {
         // 数据已在DataOutput中resize,直接使用
         // cv::Mat &frame = detectDataMsg->frame[i];
         // g_picToRtsp.BgrDataToRtsp(frame.data,
         //                           frame.cols * frame.rows * kBgrMultiplier,
-        //                           g_frameSeq);  // 使用当前序号
+        //                           g_frameSeq++);
         ImageData imgData = detectDataMsg->decodedImg[i];
-        g_picToRtsp.ImageDataToRtsp(imgData, g_frameSeq);  // 使用当前序号
+        g_picToRtsp.ImageDataToRtsp(imgData, g_frameSeq++);
     }
-    g_frameSeq++;  // 推流完成后才递增
     return ACLLITE_OK;
 }

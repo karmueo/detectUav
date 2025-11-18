@@ -45,6 +45,7 @@ const int MSG_OUTPUT_FRAME = 6;
 const int MSG_ENCODE_FINISH = 7;
 const int MSG_RTSP_DISPLAY = 8;
 const int MSG_APP_EXIT = 9;
+const int MSG_INFER_DONE = 10;
 
 const std::string kDataInputName = "dataInput";
 const std::string kPreName = "pre";
@@ -61,12 +62,14 @@ struct DetectDataMsg
     int      detectPostThreadId;
     int      dataOutputThreadId;
     int      rtspDisplayThreadId;
+    int      dataInputThreadId;  // data input thread id for flow control
     int      postId;
     uint32_t deviceId;
     uint32_t channelId; // record msg belongs to which rtsp/video channel
     bool isLastFrame;   // whether the last frame of rtsp/video of this channel
                         // has been decoded
     int msgNum;         // record frameID in rtsp/video of this channel
+    int64_t startTimestamp;  // timestamp when frame processing starts (microseconds)
     std::vector<ImageData> decodedImg;    // original image (NV12)
     ImageData              modelInputImg; // image after detect preprocess
     std::vector<cv::Mat>   frame; // original image (BGR) needed by postprocess

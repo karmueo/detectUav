@@ -9,7 +9,7 @@ SOURCE_TEST="./scripts/test.json"
 SOURCE_DATA="./data"
 SOURCE_MODEL="./model"
 REMOTE_USER="root"
-REMOTE_HOST="192.168.1.198"
+REMOTE_HOST="192.168.1.111"
 REMOTE_PATH="/root/work/yolov11_cann_video"
 
 # 检查源文件是否存在

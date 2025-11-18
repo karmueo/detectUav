@@ -103,6 +103,28 @@ DetectInferenceThread::MsgSend(shared_ptr<DetectDataMsg> detectDataMsg)
         }
     }
 
+    // Send MSG_INFER_DONE to DataInputThread for flow control
+    while (1)
+    {
+        AclLiteError ret = SendMessage(detectDataMsg->dataInputThreadId,
+                                       MSG_INFER_DONE,
+                                       nullptr);
+        if (ret == ACLLITE_ERROR_ENQUEUE)
+        {
+            usleep(kSleepTime);
+            continue;
+        }
+        else if (ret == ACLLITE_OK)
+        {
+            break;
+        }
+        else
+        {
+            ACLLITE_LOG_ERROR("Send infer done message failed, error %d", ret);
+            return ret;
+        }
+    }
+
     return ACLLITE_OK;
 }
 

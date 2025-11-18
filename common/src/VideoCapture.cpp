@@ -145,6 +145,9 @@ void FFmpegDecoder::SetDictForRtsp(AVDictionary *&avdic)
                 kReorderQueueSizeValue.c_str(),
                 kNoFlag);
     av_dict_set(&avdic, kPktSize.c_str(), kPktSizeValue.c_str(), kNoFlag);
+    // Add analyzeduration and probesize for better stream analysis
+    av_dict_set(&avdic, "analyzeduration", "5000000", kNoFlag);  // 5 seconds
+    av_dict_set(&avdic, "probesize", "5000000", kNoFlag);        // 5MB
     ACLLITE_LOG_INFO("Set parameters for %s end", streamName_.c_str());
 }
 
@@ -295,9 +298,24 @@ void FFmpegDecoder::GetVideoInfo()
         return;
     }
 
-    if (avformat_find_stream_info(avFormatContext, NULL) < 0)
+    // Set options for avformat_find_stream_info to improve RTSP stream analysis
+    AVDictionary *opts = nullptr;
+    av_dict_set(&opts, "analyzeduration", "5000000", 0);  // 5 seconds
+    av_dict_set(&opts, "probesize", "5000000", 0);        // 5MB
+    
+    int findStreamRet = avformat_find_stream_info(avFormatContext, &opts);
+    if (opts != nullptr)
     {
-        ACLLITE_LOG_ERROR("Get stream info of %s failed", streamName_.c_str());
+        av_dict_free(&opts);
+    }
+    
+    if (findStreamRet < 0)
+    {
+        char buf_error[kErrorBufferSize];
+        av_strerror(findStreamRet, buf_error, kErrorBufferSize);
+        ACLLITE_LOG_ERROR("Get stream info of %s failed, error: %s", 
+                          streamName_.c_str(), buf_error);
+        avformat_close_input(&avFormatContext);
         return;
     }
 
@@ -316,6 +334,16 @@ void FFmpegDecoder::GetVideoInfo()
 
     frameWidth_ = inStream->codecpar->width;
     frameHeight_ = inStream->codecpar->height;
+    
+    // Validate frame dimensions
+    if (frameWidth_ <= 0 || frameHeight_ <= 0)
+    {
+        ACLLITE_LOG_ERROR("Invalid video dimensions for %s: width=%d, height=%d",
+                          streamName_.c_str(), frameWidth_, frameHeight_);
+        avformat_close_input(&avFormatContext);
+        return;
+    }
+    
     if (inStream->avg_frame_rate.den)
     {
         fps_ = inStream->avg_frame_rate.num / inStream->avg_frame_rate.den;
@@ -591,6 +619,7 @@ int VideoCapture::GetVdecType()
 }
 
 // dvpp vdec callback
+// NOTE: 使用DVPP解码后的回调函数
 void VideoCapture::DvppVdecCallback(acldvppStreamDesc *input,
                                     acldvppPicDesc    *output,
                                     void              *userData)
@@ -608,7 +637,7 @@ void VideoCapture::DvppVdecCallback(acldvppStreamDesc *input,
     image->alignWidth = acldvppGetPicDescWidthStride(output);
     image->alignHeight = acldvppGetPicDescHeightStride(output);
     image->size = acldvppGetPicDescSize(output);
-
+    
     void *vdecOutBufferDev = acldvppGetPicDescData(output);
     image->data = SHARED_PTR_DVPP_BUF(vdecOutBufferDev);
 
@@ -639,11 +668,11 @@ void VideoCapture::DvppVdecCallback(acldvppStreamDesc *input,
 void VideoCapture::ProcessDecodedImage(shared_ptr<ImageData> frameData)
 {
     finFrameCnt_++;
-    if (YUV420SP_SIZE(frameData->alignWidth, frameData->alignHeight) !=
+    if (YUV420SP_SIZE(frameData->width, frameData->height) !=
         frameData->size)
     {
         ACLLITE_LOG_ERROR("Invalid decoded frame parameter, "
-                          "width %d, height %d, size %d, buffer %p\n",
+                          "width %d, height %d, size %d, buffer %p",
                           frameData->width,
                           frameData->height,
                           frameData->size,
@@ -721,6 +750,7 @@ void VideoCapture::FrameDecodeThreadFunction(void *decoderSelf)
 }
 
 // callback of ffmpeg decode frame
+// FFMPEG获取视频帧后，调用的回调函数，用来传递数据包给硬件解码
 AclLiteError
 VideoCapture::FrameDecodeCallback(void *decoder, void *frameData, int frameSize)
 {

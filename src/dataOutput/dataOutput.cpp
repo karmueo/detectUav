@@ -25,8 +25,8 @@ using namespace std;
 
 namespace
 {
-const uint32_t kOutputWidth = 960;   // 与PushRtspThread保持一致
-const uint32_t kOutputHeigth = 540;  // 与PushRtspThread保持一致
+const uint32_t kOutputWidth = 1920;   // 与PushRtspThread保持一致
+const uint32_t kOutputHeigth = 1080;  // 与PushRtspThread保持一致
 const uint32_t kSleepTime = 500;
 uint32_t       kWaitTime = 1000;
 const uint32_t kOneSec = 1000000;
@@ -176,6 +176,19 @@ AclLiteError DataOutputThread::DataProcess()
 AclLiteError
 DataOutputThread::ProcessOutput(shared_ptr<DetectDataMsg> detectDataMsg)
 {
+    // Calculate end-to-end latency
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    int64_t endTimestamp = tv.tv_sec * 1000000 + tv.tv_usec;
+    int64_t latencyUs = endTimestamp - detectDataMsg->startTimestamp;
+    double latencyMs = latencyUs / 1000.0;
+    
+    static int logCount = 0;
+    if (++logCount % 30 == 0) {
+        ACLLITE_LOG_INFO("[E2E Latency] Frame %d: %.2f ms (from DataInput to DataOutput)", 
+                         detectDataMsg->msgNum, latencyMs);
+    }
+    
     AclLiteError ret;
     if (outputDataType_ == "video")
     {

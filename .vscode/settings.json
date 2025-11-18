@@ -20,5 +20,6 @@
     "clangd.arguments": [
         "--compile-commands-dir=build",
         "--query-driver=/usr/bin/aarch64-linux-gnu-*"
-    ]
+    ],
+    "terminal.integrated.suggest.enabled": true
 }

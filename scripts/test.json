@@ -8,11 +8,11 @@
                     "model_path":"./model/yolov11n_bird_uav_bs1.om",
                     "model_width":640,
                     "model_heigth":640,
-                    "frame_skip":0,
+                    "frame_skip":1,
                     "io_info":[
                         {
-                            "input_path":"./data/06-19-17h28m36s.mp4",
-                            "input_type":"video",
+                            "input_path":"rtsp://192.168.1.80:8554/uav.264",
+                            "input_type":"rtsp",
                             "output_path":"rtsp://192.168.1.80/live/uav",
                             "output_type":"rtsp",
                             "channel_id":0

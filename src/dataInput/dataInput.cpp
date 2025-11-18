@@ -47,6 +47,8 @@ DataInputThread::DataInputThread(int32_t       deviceId,
       frameCnt_(0),
       msgNum_(0),
       batch_(batch),
+      readFrameReady_(false),
+      inferDoneReady_(true),
       inputDataType_(inputDataType),
       inputDataPath_(inputDataPath),
       inferName_(inferName),
@@ -207,8 +209,22 @@ AclLiteError DataInputThread::Process(int msgId, shared_ptr<void> msgData)
         AppStart();
         break;
     case MSG_READ_FRAME:
-        MsgRead(detectDataMsg);
-        MsgSend(detectDataMsg);
+        readFrameReady_ = true;
+        if (readFrameReady_ && inferDoneReady_) {
+            readFrameReady_ = false;
+            inferDoneReady_ = false;
+            MsgRead(detectDataMsg);
+            MsgSend(detectDataMsg);
+        }
+        break;
+    case MSG_INFER_DONE:
+        inferDoneReady_ = true;
+        if (readFrameReady_ && inferDoneReady_) {
+            readFrameReady_ = false;
+            inferDoneReady_ = false;
+            MsgRead(detectDataMsg);
+            MsgSend(detectDataMsg);
+        }
         break;
     default:
         ACLLITE_LOG_ERROR("Detect Preprocess thread receive unknow msg %d",
@@ -394,6 +410,11 @@ DataInputThread::GetOneFrame(shared_ptr<DetectDataMsg> &detectDataMsg)
 
 AclLiteError DataInputThread::MsgRead(shared_ptr<DetectDataMsg> &detectDataMsg)
 {
+    // Record start timestamp for end-to-end latency measurement
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    detectDataMsg->startTimestamp = tv.tv_sec * 1000000 + tv.tv_usec;
+    
     postproId_ = msgNum_ % postThreadNum_;
     detectDataMsg->isLastFrame = false;
     detectDataMsg->detectPreThreadId = preThreadId_;
@@ -402,6 +423,7 @@ AclLiteError DataInputThread::MsgRead(shared_ptr<DetectDataMsg> &detectDataMsg)
     detectDataMsg->postId = postproId_;
     detectDataMsg->dataOutputThreadId = dataOutputThreadId_;
     detectDataMsg->rtspDisplayThreadId = rtspDisplayThreadId_;
+    detectDataMsg->dataInputThreadId = selfThreadId_;
     detectDataMsg->deviceId = deviceId_;
     detectDataMsg->channelId = channelId_;
     detectDataMsg->msgNum = msgNum_;

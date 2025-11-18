@@ -61,6 +61,8 @@ class DataInputThread : public AclLiteThread
     int      frameCnt_;
     int      msgNum_;
     uint32_t batch_;
+    bool     readFrameReady_;  // flag for MSG_READ_FRAME received
+    bool     inferDoneReady_;  // flag for MSG_INFER_DONE received
 
     std::string inputDataType_;
     std::string inputDataPath_;

@@ -1,12 +1,13 @@
 #include "pictortsp.h"
 #include "AclLiteApp.h"
+#include <opencv2/imgproc/types_c.h>
 
 using namespace cv;
 using namespace std;
 namespace
 {
 const string   g_avFormat = "rtsp";
-const uint16_t g_frameRate = 25; // 提高到25fps，更接近原始帧率
+const uint16_t g_frameRate = 25; // 与实际管线更一致的帧率，减少PTS抖动
 } // namespace
 PicToRtsp::PicToRtsp()
 {
@@ -101,6 +102,8 @@ int PicToRtsp::AvInit(int picWidth, int picHeight, std::string g_outFile, aclrtC
 
     // 6. 设置视频流时间基准
     g_avStream->time_base = AVRational{1, g_frameRate};
+    g_avStream->avg_frame_rate = AVRational{g_frameRate, 1};
+    g_avStream->r_frame_rate = AVRational{g_frameRate, 1};
 
     // 7. 配置编解码器参数（用于推流，不用于编码）
     AVCodecParameters *param = g_avStream->codecpar;
@@ -188,11 +191,14 @@ void PicToRtsp::VencDataCallbackImpl(void* data, uint32_t size)
         std::lock_guard<std::mutex> lock(g_queueMutex);
         g_h264Queue.push(std::move(packet));
         
-        // 限制队列大小，防止内存无限增长
-        const size_t MAX_QUEUE_SIZE = 30;
+        // 限制队列大小，防止内存无限增长（适度增大，减少丢帧带来的画面抖动，代价是更高的缓冲/时延）
+        const size_t MAX_QUEUE_SIZE = 120;
         if (g_h264Queue.size() > MAX_QUEUE_SIZE)
         {
-            ACLLITE_LOG_WARNING("H264 queue size exceeds %zu, dropping oldest packet", MAX_QUEUE_SIZE);
+            static size_t dropCnt = 0;
+            dropCnt++;
+            ACLLITE_LOG_WARNING("H264 queue overflow: size=%zu>=%zu, drop oldest (total drops=%zu)",
+                                g_h264Queue.size(), MAX_QUEUE_SIZE, dropCnt);
             g_h264Queue.pop();
         }
     }
@@ -259,6 +265,8 @@ int PicToRtsp::PushH264Data(const H264Packet& packet)
     g_pkt->stream_index = g_avStream->index;
     g_pkt->pts = packet.pts;
     g_pkt->dts = packet.pts;
+    g_pkt->duration = 1; // 固定帧间隔=1个time_base单位
+    g_pkt->pos = -1;
 
     // 推流
     int ret = av_interleaved_write_frame(g_fmtCtx, g_pkt);
@@ -336,6 +344,13 @@ int PicToRtsp::YuvDataToRtsp(void *dataBuf, uint32_t size, uint32_t seq)
 // 直接使用传入的 YUV ImageData 进行编码推流（无需尺寸与格式转换）
 int PicToRtsp::ImageDataToRtsp(ImageData& imageData, uint32_t seq)
 {
+    /* {
+        cv::Mat frame;
+        cv::Mat yuvimg(imageData.height * 3 / 2, imageData.width, CV_8UC1, imageData.data.get());
+        cv::cvtColor(yuvimg, frame, CV_YUV2BGR_NV12);
+        // 保存
+        cv::imwrite("frame_tmp.jpg", frame);
+    } */
     static int  pushCount = 0;
     static long totalEncodeTime = 0;
     pushCount++;

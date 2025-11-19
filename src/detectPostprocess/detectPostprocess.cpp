@@ -289,7 +289,7 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
                 label[result[i].classIndex] + ":" + to_string(result[i].score);
             
             // 在 OpenCV 的 BGR 图像上绘制检测框
-            cv::rectangle(detectDataMsg->frame[n],
+            /* cv::rectangle(detectDataMsg->frame[n],
                           leftTopPoint,
                           rightBottomPoint,
                           kColors[i % kColors.size()],
@@ -300,7 +300,7 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
                 cv::Point(leftTopPoint.x, leftTopPoint.y + kLabelOffset),
                 cv::FONT_HERSHEY_COMPLEX,
                 kFountScale,
-                kFountColor);
+                kFountColor); */
             
             // 在 YUV420SP 图像上也绘制检测框
             DrawRect(

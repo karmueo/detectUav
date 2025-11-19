@@ -4,6 +4,6 @@
 cmake_minimum_required(VERSION 3.5.1)
 
 # project information
-project(sampleYOLOV7MultiInput)
+project(detectUav)
 
 add_subdirectory("./src")

@@ -4,6 +4,7 @@
 #include "AclLiteUtils.h"
 #include "Params.h"
 #include "label.h"
+#include "drawing.h"
 #include <cstddef>
 #include <iostream>
 
@@ -269,6 +270,15 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
         string textHead = "";
         sstream >> textHead;
         string textMid = "[";
+        
+        // 定义 YUV 颜色数组（对应不同类别）
+        const YUVColor yuvColors[] = {
+            YUVColor(149, 100, 237),  // 紫色系
+            YUVColor(215, 255, 0),    // 青色系
+            YUVColor(205, 50, 50),    // 绿色系
+            YUVColor(85, 26, 139)     // 棕色系
+        };
+        
         for (size_t i = 0; i < result.size(); ++i)
         {
             leftTopPoint.x = result[i].x - result[i].width / half;
@@ -277,6 +287,8 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
             rightBottomPoint.y = result[i].y + result[i].height / half;
             className =
                 label[result[i].classIndex] + ":" + to_string(result[i].score);
+            
+            // 在 OpenCV 的 BGR 图像上绘制检测框
             cv::rectangle(detectDataMsg->frame[n],
                           leftTopPoint,
                           rightBottomPoint,
@@ -289,6 +301,17 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
                 cv::FONT_HERSHEY_COMPLEX,
                 kFountScale,
                 kFountColor);
+            
+            // 在 YUV420SP 图像上也绘制检测框
+            DrawRect(
+                detectDataMsg->decodedImg[n],
+                leftTopPoint.x,
+                leftTopPoint.y,
+                rightBottomPoint.x,
+                rightBottomPoint.y,
+                yuvColors[i % 4],
+                kLineSolid);
+            
             textMid = textMid + className + " ";
         }
         string textPrint = textHead + textMid + "]";

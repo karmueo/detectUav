@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# 同步脚本：从远程主机 root@192.168.1.198 同步指定目录到本机 SYSROOT
+# 同步脚本：从远程主机 root@192.168.1.111 同步指定目录到本机 SYSROOT
 
 SYSROOT="/opt/ascend/sysroot"
-REMOTE_HOST="root@192.168.1.198"
+REMOTE_HOST="root@192.168.1.111"
 
 echo "Starting sync from $REMOTE_HOST to $SYSROOT"
 

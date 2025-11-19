@@ -44,6 +44,16 @@ include_directories(
         ../common/include/
 )
 
+# Enable live555 RTSP streaming (default ON). Requires toolchain to define LIVE555_* paths
+option(USE_LIVE555 "Use live555 for RTSP streaming" ON)
+if(USE_LIVE555)
+    add_definitions(-DUSE_LIVE555)
+    include_directories(${LIVE555_INCLUDE_DIRS})
+    message(STATUS "USE_LIVE555=ON (includes: ${LIVE555_INCLUDE_DIRS})")
+else()
+    message(STATUS "USE_LIVE555=OFF (FFmpeg RTSP path)")
+endif()
+
 # add host lib path
 # 优先使用指定的FFmpeg库路径
 link_directories(
@@ -52,14 +62,22 @@ link_directories(
         ${INC_PATH}/thirdpart/lib
 )
 
+if(USE_LIVE555)
+    # live555 libraries directory from toolchain
+    link_directories(${LIVE555_LIBRARY_DIRS})
+    # add live555 streamer source
+    list(APPEND LIVE555_SRC pushrtsp/Live555Streamer.cpp)
+endif()
+
 add_executable(main
         dataInput/dataInput.cpp
         detectPreprocess/detectPreprocess.cpp
         detectInference/detectInference.cpp
         detectPostprocess/detectPostprocess.cpp
         dataOutput/dataOutput.cpp
-	    pushrtsp/pictortsp.cpp
+        pushrtsp/pictortsp.cpp
         pushrtsp/pushrtspthread.cpp
+        ${LIVE555_SRC}
         main.cpp)
 
 target_sources(main 
@@ -67,5 +85,10 @@ target_sources(main
         ${aclLite})
 
 target_link_libraries(main ascendcl acl_dvpp stdc++ pthread ${COMMON_DEPEND_LIB} jsoncpp opencv_highgui opencv_core opencv_imgproc opencv_imgcodecs opencv_calib3d opencv_features2d opencv_videoio dl rt X11)
+
+if(USE_LIVE555)
+    # live555 depends on OpenSSL crypto
+    target_link_libraries(main ${LIVE555_LIBRARIES} crypto ssl)
+endif()
 
 install(TARGETS main DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})

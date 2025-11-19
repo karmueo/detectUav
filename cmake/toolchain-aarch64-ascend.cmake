@@ -50,3 +50,33 @@ find_package(OpenCV REQUIRED PATHS ${OpenCV_DIR} NO_DEFAULT_PATH)
 
 # CANN 根（按实际版本路径修正）
 set(ASCEND_TOOLKIT_HOME ${CANN_HOME} CACHE PATH "")
+
+# ==================== live555 (RTSP) 交叉编译配置 ====================
+# 假设已将 aarch64 版本的 live555 安装(同步)到 sysroot 对应目录:
+#   ${CMAKE_SYSROOT}/usr/local/Ascend/thirdpart/aarch64/{include,lib}
+# 如果你的目录结构不同,可根据实际调整 LIVE555_* 变量
+
+# live555 根目录(位于 sysroot 下)
+set(LIVE555_ROOT "${CMAKE_SYSROOT}/usr/local/Ascend/thirdpart" CACHE PATH "")
+set(LIVE555_ARCH_PATH "${LIVE555_ROOT}/aarch64" CACHE PATH "")
+
+# 头文件目录(包含顶层与各模块子目录,以兼容不同安装布局)
+set(LIVE555_INCLUDE_DIRS
+    "${LIVE555_ARCH_PATH}/include"
+    "${LIVE555_ARCH_PATH}/include/liveMedia"
+    "${LIVE555_ARCH_PATH}/include/groupsock"
+    "${LIVE555_ARCH_PATH}/include/UsageEnvironment"
+    "${LIVE555_ARCH_PATH}/include/BasicUsageEnvironment"
+    CACHE STRING "")
+
+# 库目录
+set(LIVE555_LIBRARY_DIRS "${LIVE555_ARCH_PATH}/lib" CACHE PATH "")
+
+# 库名称(按链接顺序声明)
+set(LIVE555_LIBRARIES liveMedia BasicUsageEnvironment UsageEnvironment groupsock CACHE STRING "")
+
+# 可选: 给链接器增加 rpath-link 以帮助解析二/三级依赖
+set(CMAKE_EXE_LINKER_FLAGS
+  "${CMAKE_EXE_LINKER_FLAGS} \
+   -Wl,-rpath-link,${LIVE555_LIBRARY_DIRS}"
+  CACHE STRING "" FORCE)

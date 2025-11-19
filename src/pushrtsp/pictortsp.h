@@ -13,6 +13,9 @@
 struct H264Packet {
     std::vector<uint8_t> data;
     uint64_t pts;
+    bool isKeyFrame;  // 是否为关键帧（I帧）
+    
+    H264Packet() : pts(0), isKeyFrame(false) {}
 };
 
 class PicToRtsp

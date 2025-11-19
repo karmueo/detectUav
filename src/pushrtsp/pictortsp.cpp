@@ -1,6 +1,9 @@
 #include "pictortsp.h"
 #include "AclLiteApp.h"
 #include <opencv2/imgproc/types_c.h>
+#ifdef USE_LIVE555
+#include "Live555Streamer.h"
+#endif
 
 using namespace cv;
 using namespace std;
@@ -196,18 +199,41 @@ void PicToRtsp::VencDataCallbackImpl(void* data, uint32_t size)
     memcpy(packet.data.data(), data, size);
     packet.pts = g_frameSeq++;
     
+    // 检测是否为关键帧（I帧）：H264 NAL type 5 = IDR slice
+    packet.isKeyFrame = false;
+    if (size >= 5) {
+        // 查找 NAL start code (0x00 0x00 0x00 0x01 或 0x00 0x00 0x01)
+        uint8_t* buf = static_cast<uint8_t*>(data);
+        size_t nalStart = 0;
+        if (buf[0] == 0 && buf[1] == 0) {
+            if (buf[2] == 1) nalStart = 3;
+            else if (buf[2] == 0 && buf[3] == 1) nalStart = 4;
+        }
+        if (nalStart > 0 && nalStart < size) {
+            uint8_t nalType = buf[nalStart] & 0x1F;
+            packet.isKeyFrame = (nalType == 5 || nalType == 7 || nalType == 8); // IDR, SPS, PPS
+            if (packet.isKeyFrame) {
+                static int keyFrameCount = 0;
+                if (++keyFrameCount % 50 == 1) {
+                    ACLLITE_LOG_INFO("Key frame #%d detected, NAL type: %d, size: %u bytes", keyFrameCount, nalType, size);
+                }
+            }
+        }
+    }
+    
     {
         std::lock_guard<std::mutex> lock(g_queueMutex);
         g_h264Queue.push(std::move(packet));
         
         // 限制队列大小，防止内存无限增长（适度增大，减少丢帧带来的画面抖动，代价是更高的缓冲/时延）
-        const size_t MAX_QUEUE_SIZE = 120;
-        if (g_h264Queue.size() > MAX_QUEUE_SIZE)
+        const size_t MAX_QUEUE_SIZE = 150;
+        while (g_h264Queue.size() > MAX_QUEUE_SIZE)
         {
             static size_t dropCnt = 0;
-            dropCnt++;
-            ACLLITE_LOG_WARNING("H264 queue overflow: size=%zu>=%zu, drop oldest (total drops=%zu)",
-                                g_h264Queue.size(), MAX_QUEUE_SIZE, dropCnt);
+            if (++dropCnt % 50 == 1) {
+                ACLLITE_LOG_WARNING("H264 queue overflow: size=%zu>%zu, dropped %zu frames",
+                                    g_h264Queue.size(), MAX_QUEUE_SIZE, dropCnt);
+            }
             g_h264Queue.pop();
         }
     }
@@ -252,6 +278,24 @@ void PicToRtsp::PushThreadFunc()
 // 推送H264数据到RTSP流
 int PicToRtsp::PushH264Data(const H264Packet& packet)
 {
+#ifdef USE_LIVE555
+    // 使用 Live555: 在此直接将数据投喂给 Live555 内置队列
+    static Live555Streamer s_streamer;
+    static bool s_inited = false;
+    if (!s_inited) {
+        // 首次调用时初始化本地 RTSP 服务器(默认 8554/stream)
+        if (!s_streamer.InitStandalone(8554, "stream", g_frameRate)) {
+            ACLLITE_LOG_ERROR("Live555 InitStandalone failed");
+            return ACLLITE_ERROR;
+        }
+        s_streamer.Start();
+        ACLLITE_LOG_INFO("Live555 started at %s", s_streamer.GetRtspUrl().c_str());
+        s_inited = true;
+    }
+
+    s_streamer.Enqueue(packet);
+    return ACLLITE_OK;
+#else
     if (!g_fmtCtx || !g_avStream || !g_pkt)
     {
         ACLLITE_LOG_ERROR("Invalid RTSP context");
@@ -274,43 +318,28 @@ int PicToRtsp::PushH264Data(const H264Packet& packet)
     g_pkt->stream_index = g_avStream->index;
     
     // 正确计算时间戳：将帧序号转换为90000Hz时间基准
-    // 帧率50fps，每帧间隔 = 90000/50 = 1800 ticks
     int64_t pts = packet.pts * (90000 / g_frameRate);
     g_pkt->pts = pts;
     g_pkt->dts = pts;
     g_pkt->duration = 90000 / g_frameRate; // 每帧的持续时间
     g_pkt->pos = -1;
     
-    // 检测并标记关键帧(I帧)：检查NAL unit type
-    // H264: NAL unit type在第一个字节的低5位
+    // 检测并标记关键帧(I帧)
     if (packet.data.size() >= 5)
     {
-        // 查找起始码后的NAL unit type
         size_t nalStart = 0;
         if (packet.data[0] == 0 && packet.data[1] == 0)
         {
-            if (packet.data[2] == 1)
-            {
-                nalStart = 3;
-            }
-            else if (packet.data[2] == 0 && packet.data[3] == 1)
-            {
-                nalStart = 4;
-            }
+            if (packet.data[2] == 1) nalStart = 3;
+            else if (packet.data[2] == 0 && packet.data[3] == 1) nalStart = 4;
         }
-        
         if (nalStart > 0 && nalStart < packet.data.size())
         {
             uint8_t nalType = packet.data[nalStart] & 0x1F;
-            // NAL type 5 = IDR (关键帧), 7 = SPS, 8 = PPS
-            if (nalType == 5 || nalType == 7 || nalType == 8)
-            {
-                g_pkt->flags |= AV_PKT_FLAG_KEY;
-            }
+            if (nalType == 5 || nalType == 7 || nalType == 8) g_pkt->flags |= AV_PKT_FLAG_KEY;
         }
     }
 
-    // 推流
     int ret = av_interleaved_write_frame(g_fmtCtx, g_pkt);
     if (ret < 0)
     {
@@ -320,9 +349,9 @@ int PicToRtsp::PushH264Data(const H264Packet& packet)
         av_freep(&g_pkt->data);
         return ACLLITE_ERROR;
     }
-
     av_freep(&g_pkt->data);
     return ACLLITE_OK;
+#endif
 }
 
 int PicToRtsp::FlushEncoder()

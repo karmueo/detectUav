@@ -21,7 +21,7 @@ const vector<cv::Scalar> kColors{cv::Scalar(237, 149, 100),
                                  cv::Scalar(0, 215, 255),
                                  cv::Scalar(50, 205, 50),
                                  cv::Scalar(139, 85, 26)};
-const uint32_t           kNumPredictions = 8400;
+const uint32_t           kNumPredictions = 34000;
 const float              kConfThresh = 0.25f;
 const float              kNmsThresh = 0.45f;
 const uint32_t           kNumClasses = 2;
@@ -309,7 +309,7 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
                 leftTopPoint.y,
                 rightBottomPoint.x,
                 rightBottomPoint.y,
-                yuvColors[i % 4],
+                yuvColors[result[i].classIndex % 4],
                 kLineSolid);
             
             textMid = textMid + className + " ";

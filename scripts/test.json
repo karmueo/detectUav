@@ -5,9 +5,10 @@
             "model_config":[
                 {
                     "infer_thread_name":"infer_thread_0",
-                    "model_path":"./model/yolov11n_bird_uav_bs1.om",
+                    "model_path":"./model/yolov11n_110_rgb_640_raw_v0_bs8.om",
                     "model_width":640,
                     "model_heigth":640,
+                    "model_batch": 8,
                     "frame_skip":1,
                     "io_info":[
                         {

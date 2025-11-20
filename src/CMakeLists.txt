@@ -9,7 +9,7 @@ add_compile_options(-std=c++11)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY  "out")
 set(CMAKE_CXX_FLAGS_DEBUG "-fPIC -O0 -g -Wall")
-set(CMAKE_CXX_FLAGS_RELEASE "-fPIC -O2 -Wall")
+set(CMAKE_CXX_FLAGS_RELEASE "-fPIC -O2 -Wall -s")  # -s选项自动strip符号
 
 set(INC_PATH $ENV{DDK_PATH})
 if (NOT DEFINED ENV{DDK_PATH})

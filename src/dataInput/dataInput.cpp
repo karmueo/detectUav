@@ -209,23 +209,28 @@ AclLiteError DataInputThread::Process(int msgId, shared_ptr<void> msgData)
         AppStart();
         break;
     case MSG_READ_FRAME:
-        readFrameReady_ = true;
-        if (readFrameReady_ && inferDoneReady_) {
-            readFrameReady_ = false;
-            inferDoneReady_ = false;
-            MsgRead(detectDataMsg);
-            MsgSend(detectDataMsg);
-        }
+        MsgRead(detectDataMsg);
+        MsgSend(detectDataMsg);
         break;
-    case MSG_INFER_DONE:
-        inferDoneReady_ = true;
-        if (readFrameReady_ && inferDoneReady_) {
-            readFrameReady_ = false;
-            inferDoneReady_ = false;
-            MsgRead(detectDataMsg);
-            MsgSend(detectDataMsg);
-        }
-        break;
+    // FIXME: 暂时注释掉以下代码，避免与DataOutputThread中发送的MSG_INFER_DONE冲突
+    // case MSG_READ_FRAME:
+    //     readFrameReady_ = true;
+    //     if (readFrameReady_ && inferDoneReady_) {
+    //         readFrameReady_ = false;
+    //         inferDoneReady_ = false;
+    //         MsgRead(detectDataMsg);
+    //         MsgSend(detectDataMsg);
+    //     }
+    //     break;
+    // case MSG_INFER_DONE:
+    //     inferDoneReady_ = true;
+    //     if (readFrameReady_ && inferDoneReady_) {
+    //         readFrameReady_ = false;
+    //         inferDoneReady_ = false;
+    //         MsgRead(detectDataMsg);
+    //         MsgSend(detectDataMsg);
+    //     }
+    //     break;
     default:
         ACLLITE_LOG_ERROR("Detect Preprocess thread receive unknow msg %d",
                           msgId);

@@ -372,7 +372,7 @@ AclLiteError
 DataOutputThread::SendImageToRtsp(shared_ptr<DetectDataMsg> &detectDataMsg)
 {
     // Resize图像到推流分辨率
-    for (int i = 0; i < detectDataMsg->frame.size(); i++)
+    /* for (int i = 0; i < detectDataMsg->frame.size(); i++)
     {
         cv::resize(detectDataMsg->frame[i],
                    detectDataMsg->frame[i],
@@ -380,7 +380,7 @@ DataOutputThread::SendImageToRtsp(shared_ptr<DetectDataMsg> &detectDataMsg)
                    0,
                    0,
                    cv::INTER_LINEAR);
-    }
+    } */
     
     AclLiteError ret = DisplayMsgSend(detectDataMsg);
     if (ret != ACLLITE_OK)

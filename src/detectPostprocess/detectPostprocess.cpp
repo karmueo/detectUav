@@ -7,6 +7,8 @@
 #include "drawing.h"
 #include <cstddef>
 #include <iostream>
+#include <iomanip>
+#include <sstream>
 
 using namespace std;
 
@@ -193,7 +195,6 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
         // filter boxes by NMS
         vector<BoundBox> result;
         result.clear();
-        int32_t maxLength = srcWidth > srcHeight ? srcWidth : srcHeight;
         std::sort(boxes.begin(), boxes.end(), sortScore);
         BoundBox boxMax;
         BoundBox boxCompare;
@@ -207,10 +208,8 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
                 boxMax.classIndex = boxes[0].classIndex;
                 boxMax.index = boxes[0].index;
 
-                // translate point by maxLength * boxes[0].classIndex to
-                // avoid bumping into two boxes of different classes
-                boxMax.x = boxes[0].x + maxLength * boxes[0].classIndex;
-                boxMax.y = boxes[0].y + maxLength * boxes[0].classIndex;
+                boxMax.x = boxes[0].x;
+                boxMax.y = boxes[0].y;
                 boxMax.width = boxes[0].width;
                 boxMax.height = boxes[0].height;
 
@@ -218,12 +217,8 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
                 boxCompare.classIndex = boxes[index].classIndex;
                 boxCompare.index = boxes[index].index;
 
-                // translate point by maxLength * boxes[0].classIndex to
-                // avoid bumping into two boxes of different classes
-                boxCompare.x =
-                    boxes[index].x + boxes[index].classIndex * maxLength;
-                boxCompare.y =
-                    boxes[index].y + boxes[index].classIndex * maxLength;
+                boxCompare.x = boxes[index].x;
+                boxCompare.y = boxes[index].y;
                 boxCompare.width = boxes[index].width;
                 boxCompare.height = boxes[index].height;
 
@@ -285,8 +280,13 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
             leftTopPoint.y = result[i].y - result[i].height / half;
             rightBottomPoint.x = result[i].x + result[i].width / half;
             rightBottomPoint.y = result[i].y + result[i].height / half;
-            className =
-                label[result[i].classIndex] + ":" + to_string(result[i].score);
+            
+            // 格式化置信度为2位小数
+            std::stringstream ss;
+            ss << std::fixed << std::setprecision(2) << result[i].score;
+            std::string scoreStr = ss.str();
+            
+            className = label[result[i].classIndex] + ":" + scoreStr;
             
             // 在 OpenCV 的 BGR 图像上绘制检测框
             /* cv::rectangle(detectDataMsg->frame[n],
@@ -311,6 +311,17 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
                 rightBottomPoint.y,
                 yuvColors[result[i].classIndex % 4],
                 kLineSolid);
+            
+            // 在检测框上方绘制文字（类别和置信度）
+            DrawText(
+                detectDataMsg->decodedImg[n],
+                leftTopPoint.x,
+                leftTopPoint.y - 30,  // 上方30像素，避免覆盖检测框
+                className,
+                yuvColors[result[i].classIndex % 4],
+                24,  // 字体大小
+                1.0f // 透明度
+            );
             
             textMid = textMid + className + " ";
         }

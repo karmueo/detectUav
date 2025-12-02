@@ -18,8 +18,14 @@ class YUVColor
     uint8_t v;
 };
 
-// void DrawText(ImageData& image, int x, int y, const std::string &text, const
-// YUVColor &color);
+void DrawText(
+    ImageData         &image,
+    int                x,
+    int                y,
+    const std::string &text,
+    const YUVColor    &color,
+    int                fontSize = 24,
+    float              alpha = 1.0f);
 void DrawRect(
     ImageData      &image,
     int             x1,

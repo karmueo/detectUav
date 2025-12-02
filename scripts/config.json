@@ -12,7 +12,7 @@
                     "frame_skip":1,
                     "io_info":[
                         {
-                            "input_path":"rtsp://192.168.1.80:8554/uav.264",
+                            "input_path":"rtsp://admin:scl000144@192.168.2.64:554/Streaming/Channels/101",
                             "input_type":"rtsp",
                             "output_path":"rtsp://192.168.1.80/live/uav",
                             "output_type":"rtsp",

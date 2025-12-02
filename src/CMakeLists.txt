@@ -42,6 +42,8 @@ include_directories(
         ../common/include/
 )
 
+find_package(Freetype REQUIRED)
+
 # Enable live555 RTSP streaming (default ON). Requires toolchain to define LIVE555_* paths
 option(USE_LIVE555 "Use live555 for RTSP streaming" ON)
 if(USE_LIVE555)
@@ -82,7 +84,7 @@ target_sources(main
     PUBLIC
         ${aclLite})
 
-target_link_libraries(main ascendcl acl_dvpp stdc++ pthread ${COMMON_DEPEND_LIB} jsoncpp opencv_highgui opencv_core opencv_imgproc opencv_imgcodecs opencv_calib3d opencv_features2d opencv_videoio dl rt X11)
+target_link_libraries(main ascendcl acl_dvpp stdc++ pthread ${COMMON_DEPEND_LIB} jsoncpp opencv_highgui opencv_core opencv_imgproc opencv_imgcodecs opencv_calib3d opencv_features2d opencv_videoio dl rt X11 Freetype::Freetype)
 
 if(USE_LIVE555)
     # live555 depends on OpenSSL crypto

@@ -59,7 +59,7 @@ AclLiteError DataOutputThread::SetOutputVideo()
     stringstream sstream;
     sstream.str("");
     sstream << outputPath_;
-    int fps = 25;
+    int fps = 15;
     outputVideo_.open(sstream.str(),
                       cv::VideoWriter::fourcc('m', 'p', '4', 'v'),
                       fps,

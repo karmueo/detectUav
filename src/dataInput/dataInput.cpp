@@ -28,7 +28,6 @@ const uint32_t kYuvDivisor = 2;
 const uint32_t kSleepTime = 500;
 const uint32_t kOneSec = 1000000;
 const uint32_t kOneMSec = 1000;
-const uint32_t kTargetFPS = 25;  // 目标帧率,控制输入速度
 } // namespace
 using namespace std;
 

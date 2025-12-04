@@ -237,9 +237,16 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                     }
 
                     // 创建单目标跟踪线程（MixformerV2OM），每个通道一个实例
+                    // 读取跟踪模型路径
+                    string trackModelPath = "";
+                    if (root["device_config"][i]["model_config"][j]["io_info"][k]["track_model_path"].type() != Json::nullValue)
+                    {
+                        trackModelPath = root["device_config"][i]["model_config"][j]["io_info"][k]["track_model_path"].asString();
+                    }
+                    
                     string trackName = string("track") + to_string(channelId);
                     AclLiteThreadParam trackParam;
-                    trackParam.threadInst = new MixformerV2OM(""); // 使用默认模型路径
+                    trackParam.threadInst = new MixformerV2OM(trackModelPath); // 使用配置文件中的模型路径
                     trackParam.threadInstName.assign(trackName.c_str());
                     trackParam.context = context;
                     trackParam.runMode = runMode;

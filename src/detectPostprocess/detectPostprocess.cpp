@@ -302,20 +302,6 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
             
             className = label[result[i].classIndex] + ":" + scoreStr;
             
-            // 在 OpenCV 的 BGR 图像上绘制检测框
-            /* cv::rectangle(detectDataMsg->frame[n],
-                          leftTopPoint,
-                          rightBottomPoint,
-                          kColors[i % kColors.size()],
-                          kLineSolid);
-            cv::putText(
-                detectDataMsg->frame[n],
-                className,
-                cv::Point(leftTopPoint.x, leftTopPoint.y + kLabelOffset),
-                cv::FONT_HERSHEY_COMPLEX,
-                kFountScale,
-                kFountColor); */
-            
             // 在 YUV420SP 图像上也绘制检测框
             DrawRect(
                 detectDataMsg->decodedImg[n],
@@ -354,7 +340,7 @@ DetectPostprocessThread::MsgSend(shared_ptr<DetectDataMsg> detectDataMsg)
     {
         int targetThreadId = detectDataMsg->dataOutputThreadId;
         int targetMsgId = MSG_OUTPUT_FRAME;
-        if (detectDataMsg->trackThreadId >= 0)
+        if (detectDataMsg->trackThreadId != INVALID_INSTANCE_ID)
         {
             targetThreadId = detectDataMsg->trackThreadId;
             targetMsgId = MSG_TRACK_DATA;

@@ -2,9 +2,13 @@
 #include "AclLiteApp.h"
 #include "AclLiteUtils.h"
 #include "Params.h"
+#include <unistd.h>
 #include <cstring>
+#include <fstream>
 #include <limits>
 #include <vector>
+#include <sstream>
+#include <iomanip>
 
 // Constants for normalization
 const float MixformerV2OM::mean_vals[3] = {
@@ -12,14 +16,16 @@ const float MixformerV2OM::mean_vals[3] = {
     0.456f * 255,
     0.406f * 255};
 const float MixformerV2OM::norm_vals[3] = {
-    1.0f / 0.229f,
-    1.0f / 0.224f,
-    1.0f / 0.225f};
+    1.0f / 0.229f / 255.f,
+    1.0f / 0.224f / 255.f,
+    1.0f / 0.225f / 255.f};
 
 namespace
 {
 constexpr const char *kDefaultMixFormerModel =
     "model/mixformerv2_online_small.om";
+
+const uint32_t kSleepTime = 500;
 
 // Model input/output tensor names (these should match your OM model)
 constexpr const char *kInputTemplateName = "template";
@@ -96,15 +102,23 @@ int MixformerV2OM::InitModel()
         return 0;
     }
 
+    // Check if model file exists (optional validation)
+    std::ifstream modelFile(model_path_);
+    if (!modelFile.good())
+    {
+        ACLLITE_LOG_WARNING("Model file not accessible: %s, attempting to load anyway", model_path_.c_str());
+    }
+
+    ACLLITE_LOG_INFO("MixFormerV2 OM initializing with model path: %s", model_path_.c_str());
     AclLiteError ret = model_.Init(model_path_);
     if (ret != ACLLITE_OK)
     {
-        ACLLITE_LOG_ERROR("MixFormerV2 OM model init failed, error: %d", ret);
+        ACLLITE_LOG_ERROR("MixFormerV2 OM model init failed for path [%s], error: %d", model_path_.c_str(), ret);
         return -1;
     }
 
     model_initialized_ = true;
-    ACLLITE_LOG_INFO("MixFormerV2 OM model initialized successfully");
+    ACLLITE_LOG_INFO("MixFormerV2 OM model initialized successfully from: %s", model_path_.c_str());
     return 0;
 }
 
@@ -172,6 +186,31 @@ AclLiteError MixformerV2OM::Process(int msgId, std::shared_ptr<void> data)
                         detectDataMsg->trackInitScore = best.score;
                     }
                 }
+                // NOTE: Draw detection results (all detections) onto the image for debugging
+                /* try
+                {
+                    if (!img.empty())
+                    {
+                        cv::Mat draw_img = img.clone();
+                        for (const auto &d : detectDataMsg->detections)
+                        {
+                            int dx0 = std::max(0, static_cast<int>(std::round(d.x0)));
+                            int dy0 = std::max(0, static_cast<int>(std::round(d.y0)));
+                            int dx1 = std::min(draw_img.cols - 1, static_cast<int>(std::round(d.x1)));
+                            int dy1 = std::min(draw_img.rows - 1, static_cast<int>(std::round(d.y1)));
+                            cv::rectangle(draw_img, cv::Point(dx0, dy0), cv::Point(dx1, dy1), cv::Scalar(0, 0, 255), 2);
+                            std::ostringstream ss;
+                            ss << "cls:" << d.class_id << " s:" << std::fixed << std::setprecision(2) << d.score;
+                            cv::putText(draw_img, ss.str(), cv::Point(dx0, std::max(0, dy0 - 4)), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
+                        }
+                        cv::imwrite("detect_img_draw.jpg", draw_img);
+                        ACLLITE_LOG_INFO("Saved detection image with drawn boxes to detect_img_draw.jpg");
+                    }
+                }
+                catch (const cv::Exception &e)
+                {
+                    ACLLITE_LOG_WARNING("Failed to draw detection image: %s", e.what());
+                } */
             }
             else
             {
@@ -190,39 +229,34 @@ AclLiteError MixformerV2OM::Process(int msgId, std::shared_ptr<void> data)
             }
         }
 
-        // Forward message to DataOutputThread
-        AclLiteError ret;
-        while (1)
+        // NOTE: Draw all detections on the image (if present) for debugging and save
+        /* try
         {
-            ret = SendMessage(
-                dataOutputThreadId_,
-                MSG_OUTPUT_FRAME,
-                detectDataMsg);
-            if (ret == ACLLITE_ERROR_ENQUEUE)
+            if (!detectDataMsg->frame.empty() && !detectDataMsg->detections.empty())
             {
-                usleep(500);
-                continue;
-            }
-            break;
-        }
-
-        // Handle last frame encoding finish
-        if (detectDataMsg->isLastFrame)
-        {
-            while (1)
-            {
-                ret = SendMessage(
-                    dataOutputThreadId_,
-                    MSG_ENCODE_FINISH,
-                    detectDataMsg);
-                if (ret == ACLLITE_ERROR_ENQUEUE)
+                cv::Mat draw_img = detectDataMsg->frame[0].clone();
+                for (const auto &d : detectDataMsg->detections)
                 {
-                    usleep(500);
-                    continue;
+                    int dx0 = std::max(0, static_cast<int>(std::round(d.x0)));
+                    int dy0 = std::max(0, static_cast<int>(std::round(d.y0)));
+                    int dx1 = std::min(draw_img.cols - 1, static_cast<int>(std::round(d.x1)));
+                    int dy1 = std::min(draw_img.rows - 1, static_cast<int>(std::round(d.y1)));
+                    cv::rectangle(draw_img, cv::Point(dx0, dy0), cv::Point(dx1, dy1), cv::Scalar(0, 0, 255), 2);
+                    std::ostringstream ss;
+                    ss << "cls:" << d.class_id << " s:" << std::fixed << std::setprecision(2) << d.score;
+                    cv::putText(draw_img, ss.str(), cv::Point(dx0, std::max(0, dy0 - 4)), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
                 }
-                break;
+                cv::imwrite("detect_img_draw.jpg", draw_img);
+                ACLLITE_LOG_INFO("Saved detection image with drawn boxes to detect_img_draw.jpg");
             }
         }
+        catch (const cv::Exception &e)
+        {
+            ACLLITE_LOG_WARNING("Failed to draw detection image: %s", e.what());
+        } */
+
+        // Forward message to DataOutputThread via helper
+        MsgSend(detectDataMsg);
 
         return ACLLITE_OK;
     }
@@ -230,6 +264,57 @@ AclLiteError MixformerV2OM::Process(int msgId, std::shared_ptr<void> data)
         ACLLITE_LOG_INFO("MixformerV2OM thread ignore msg %d", msgId);
         return ACLLITE_OK;
     }
+}
+
+AclLiteError MixformerV2OM::MsgSend(std::shared_ptr<DetectDataMsg> detectDataMsg)
+{
+    while (1)
+    {
+        AclLiteError ret = SendMessage(dataOutputThreadId_, MSG_OUTPUT_FRAME, detectDataMsg);
+        if (ret == ACLLITE_ERROR_ENQUEUE)
+        {
+            usleep(kSleepTime);
+            continue;
+        }
+        else if (ret == ACLLITE_OK)
+        {
+            break;
+        }
+        else
+        {
+            ACLLITE_LOG_ERROR("MixformerV2OM send output frame message failed, error %d", ret);
+            return ret;
+        }
+    }
+
+    if (detectDataMsg->isLastFrame)
+    {
+        while (1)
+        {
+            AclLiteError ret = SendMessage(
+                dataOutputThreadId_,
+                MSG_ENCODE_FINISH,
+                detectDataMsg);
+            if (ret == ACLLITE_ERROR_ENQUEUE)
+            {
+                usleep(kSleepTime);
+                continue;
+            }
+            else if (ret == ACLLITE_OK)
+            {
+                break;
+            }
+            else
+            {
+                ACLLITE_LOG_ERROR(
+                    "MixformerV2OM send encode finish message failed, error %d",
+                    ret);
+                return ret;
+            }
+        }
+    }
+
+    return ACLLITE_OK;
 }
 
 void MixformerV2OM::setTemplateSize(int size)
@@ -289,6 +374,47 @@ int MixformerV2OM::init(const cv::Mat &img, DrOBB bbox)
         return -1;
     }
 
+    // NOTE: Save the input image from init() to disk for debugging comparison
+    /* try
+    {
+        if (!img.empty())
+        {
+            cv::imwrite("init_img.jpg", img);
+            ACLLITE_LOG_INFO("Saved init image to init_img.jpg");
+        }
+        else
+        {
+            ACLLITE_LOG_WARNING("Init image is empty, not saving init_img.jpg");
+        }
+    }
+    catch (const cv::Exception &e)
+    {
+        ACLLITE_LOG_WARNING("Failed to save init image: %s", e.what());
+    }
+
+    // Persist the incoming bbox to a simple text file for debugging
+    try
+    {
+        std::ofstream bbox_file("ini_box.txt");
+        if (bbox_file.is_open())
+        {
+            // Persist only x0 y0 x1 y1 and class_id. Other values will be recomputed when reading.
+            bbox_file << bbox.box.x0 << " " << bbox.box.y0 << " " << bbox.box.x1 << " " << bbox.box.y1
+                      << " " << bbox.class_id << "\n";
+            bbox_file.close();
+            ACLLITE_LOG_INFO("Saved init bbox to ini_box.txt");
+        }
+        else
+        {
+            ACLLITE_LOG_WARNING("Unable to open ini_box.txt for writing");
+        }
+    }
+    catch (const std::exception &e)
+    {
+        ACLLITE_LOG_WARNING("Failed to save init bbox: %s", e.what());
+    } */
+    // ================================================================================================================
+
     cv::Mat template_patch;
     float   resize_factor = 1.f;
 
@@ -323,6 +449,29 @@ int MixformerV2OM::init(const cv::Mat &img, DrOBB bbox)
     this->resetMaxPredScore();
     this->frame_id = 0;
 
+    // Draw bounding box on init image and save
+    try
+    {
+        if (!img.empty())
+        {
+            cv::Mat draw_img = img.clone();
+            int x0 = std::max(0, static_cast<int>(std::round(bbox.box.x0)));
+            int y0 = std::max(0, static_cast<int>(std::round(bbox.box.y0)));
+            int x1 = std::min(draw_img.cols - 1, static_cast<int>(std::round(bbox.box.x1)));
+            int y1 = std::min(draw_img.rows - 1, static_cast<int>(std::round(bbox.box.y1)));
+            cv::rectangle(draw_img, cv::Point(x0, y0), cv::Point(x1, y1), cv::Scalar(0, 255, 0), 2);
+            std::ostringstream ss;
+            ss << "cls:" << bbox.class_id;
+            cv::putText(draw_img, ss.str(), cv::Point(x0, std::max(0, y0 - 4)), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+            cv::imwrite("init_img_draw.jpg", draw_img);
+            ACLLITE_LOG_INFO("Saved init image with drawn bbox to init_img_draw.jpg");
+        }
+    }
+    catch (const cv::Exception &e)
+    {
+        ACLLITE_LOG_WARNING("Failed to draw and save init image: %s", e.what());
+    }
+
     return 0;
 }
 
@@ -334,6 +483,25 @@ const DrOBB &MixformerV2OM::track(const cv::Mat &img)
         std::memset(&this->object_box, 0, sizeof(DrOBB));
         return this->object_box;
     }
+
+    // NOTE: Save the incoming image for tracking to disk for debugging
+    /* try
+    {
+        if (!img.empty())
+        {
+            cv::imwrite("track_img.jpg", img);
+            ACLLITE_LOG_INFO("Saved track image to track_img.jpg");
+        }
+        else
+        {
+            ACLLITE_LOG_WARNING("Track image is empty, not saving track_img.jpg");
+        }
+    }
+    catch (const cv::Exception &e)
+    {
+        ACLLITE_LOG_WARNING("Failed to save track image: %s", e.what());
+    } */
+    // ===============================================================================================================
 
     const int interval =
         this->update_interval > 0 ? this->update_interval : 200;
@@ -404,6 +572,30 @@ const DrOBB &MixformerV2OM::track(const cv::Mat &img)
     this->state = pred_box;
     this->object_box.box = pred_box;
     this->object_box.score = pred_score;
+
+    // NOTE: Draw the tracked bbox on the track image and save
+    /* try
+    {
+        if (!img.empty())
+        {
+            cv::Mat draw_img = img.clone();
+            int x0 = std::max(0, static_cast<int>(std::round(pred_box.x0)));
+            int y0 = std::max(0, static_cast<int>(std::round(pred_box.y0)));
+            int x1 = std::min(draw_img.cols - 1, static_cast<int>(std::round(pred_box.x1)));
+            int y1 = std::min(draw_img.rows - 1, static_cast<int>(std::round(pred_box.y1)));
+            cv::rectangle(draw_img, cv::Point(x0, y0), cv::Point(x1, y1), cv::Scalar(0, 255, 0), 2);
+            std::ostringstream ss;
+            ss << std::fixed << std::setprecision(2) << pred_score;
+            std::string label = "cls:" + std::to_string(this->object_box.class_id) + " s:" + ss.str();
+            cv::putText(draw_img, label, cv::Point(x0, std::max(0, y0 - 4)), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+            cv::imwrite("track_img_draw.jpg", draw_img);
+            ACLLITE_LOG_INFO("Saved track image with drawn bbox to track_img_draw.jpg");
+        }
+    }
+    catch (const cv::Exception &e)
+    {
+        ACLLITE_LOG_WARNING("Failed to draw and save track image: %s", e.what());
+    } */
 
     const bool should_update_online_template =
         (current_frame_id % interval == 0);
@@ -580,8 +772,6 @@ int MixformerV2OM::sample_target(
         return -1;
     }
 
-    int x = bbox.x0;
-    int y = bbox.y0;
     int w = bbox.w;
     int h = bbox.h;
     int crop_sz = std::ceil(std::sqrt(w * h) * factor);

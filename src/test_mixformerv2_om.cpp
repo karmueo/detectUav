@@ -6,6 +6,8 @@
 #include <string>
 #include <stdexcept>
 #include <cstring>
+#include <opencv2/opencv.hpp>
+#include <sstream>
 
 // Lightweight .npy reader for float32 arrays. Supports v1.0 and v2.0 headers.
 static uint16_t read_le_u16(std::ifstream &f) {
@@ -17,6 +19,29 @@ static uint32_t read_le_u32(std::ifstream &f) {
     uint8_t b[4];
     f.read(reinterpret_cast<char*>(b), 4);
     return uint32_t(b[0]) | (uint32_t(b[1]) << 8) | (uint32_t(b[2]) << 16) | (uint32_t(b[3]) << 24);
+}
+
+// Safe manual integer parse from ASCII string without libc strtol/stoi usage.
+static bool try_parse_int(const std::string &s, int &out) {
+    if (s.empty()) return false;
+    size_t i = 0;
+    bool neg = false;
+    if (s[0] == '+' || s[0] == '-') {
+        neg = (s[0] == '-');
+        i = 1;
+        if (i >= s.size()) return false; // just a sign
+    }
+    long long val = 0;
+    for (; i < s.size(); ++i) {
+        char c = s[i];
+        if (c < '0' || c > '9') return false;
+        val = val * 10 + (c - '0');
+        // Keep it in range of 64-bit to avoid overflows
+        if (val > (1LL<<62)) return false;
+    }
+    if (neg) val = -val;
+    out = static_cast<int>(val);
+    return true;
 }
 
 std::vector<float> load_npy(const std::string& path) {
@@ -175,10 +200,7 @@ int main() {
         return -1;
     }
 
-    // Expected input sizes (from model definition)
-    const size_t expected_template_size = 1 * 3 * 112 * 112;        // 37632
-    const size_t expected_online_template_size = 1 * 3 * 112 * 112; // 37632
-    const size_t expected_search_size = 1 * 3 * 224 * 224;          // 150528
+    // Note: This test reads init_img.jpg / ini_box.txt and track_img.jpg
 
     MixformerV2OM tracker("./model/mixformerv2_online_small_bs1.om");
     if (tracker.InitModel() != 0) {
@@ -187,46 +209,82 @@ int main() {
     }
 
     try {
-        // Load inputs
-        auto template_data = load_npy("data/test_inputs/template_input.npy");
-        auto online_template_data = load_npy("data/test_inputs/online_template_input.npy");
-        auto search_data = load_npy("data/test_inputs/search_input.npy");
-
-        // Check sizes
-        if (template_data.size() != expected_template_size) {
-            std::cerr << "Template size mismatch: expected " << expected_template_size << ", got " << template_data.size() << std::endl;
-            return -1;
-        }
-        if (online_template_data.size() != expected_online_template_size) {
-            std::cerr << "Online template size mismatch: expected " << expected_online_template_size << ", got " << online_template_data.size() << std::endl;
-            return -1;
-        }
-        if (search_data.size() != expected_search_size) {
-            std::cerr << "Search size mismatch: expected " << expected_search_size << ", got " << search_data.size() << std::endl;
+        // Read init image and bbox (written by mixformerv2_om::init())
+        cv::Mat init_img = cv::imread("init_img.jpg");
+        if (init_img.empty()) {
+            std::cerr << "Failed to read init_img.jpg or file not found" << std::endl;
             return -1;
         }
 
-        // Set input data
-        tracker.setInputTemplateData(template_data.data(), template_data.size());
-        tracker.setInputOnlineTemplateData(online_template_data.data(), online_template_data.size());
-        tracker.setInputSearchData(search_data.data(), search_data.size());
-
-        // Run inference
-        tracker.infer();
-
-        // Get and print outputs
-        std::cout << "Pred Boxes: ";
-        auto boxes = tracker.getOutputPredBoxes();
-        for (size_t i = 0; i < boxes.size() && i < 4; ++i) {
-            std::cout << boxes[i] << " ";
+        // Parse ini_box.txt. Expected one line with: x0 y0 x1 y1 [class_id]
+        // Only x0,y0,x1,y1 (and optional class_id) are read from file. w,h,cx,cy are recomputed.
+        DrOBB init_box;
+        init_box.score = 1.0f;
+        init_box.class_id = 0;
+        {
+            std::ifstream bbox_file("ini_box.txt");
+            if (!bbox_file) {
+                std::cerr << "Failed to open ini_box.txt" << std::endl;
+                return -1;
+            }
+            std::string line;
+            std::getline(bbox_file, line);
+            std::istringstream ss(line);
+            float x0=0,y0=0,x1=0,y1=0; int class_id=0;
+            if (!(ss >> x0 >> y0 >> x1 >> y1)) {
+                std::cerr << "Invalid ini_box.txt format. Expected at least 'x0 y0 x1 y1'" << std::endl;
+                return -1;
+            }
+            // Read any remaining tokens; support either formats:
+            // - x0 y0 x1 y1
+            // - x0 y0 x1 y1 class_id
+            // - x0 y0 x1 y1 w h cx cy class_id
+            std::vector<std::string> rem;
+            std::string tok;
+            while (ss >> tok) rem.push_back(tok);
+            if (!rem.empty()) {
+                // If there are multiple tokens, assume class_id is the last value
+                int tmp = 0;
+                if (!try_parse_int(rem.back(), tmp)) {
+                    class_id = 0; // fallback
+                } else {
+                    class_id = tmp;
+                }
+            }
+            // Ensure coordinates are ordered left-top -> right-bottom
+            if (x1 < x0) std::swap(x0, x1);
+            if (y1 < y0) std::swap(y0, y1);
+            // Recompute width/height and center
+            float w = x1 - x0;
+            float h = y1 - y0;
+            float cx = x0 + 0.5f * w;
+            float cy = y0 + 0.5f * h;
+            init_box.box.x0 = x0;
+            init_box.box.y0 = y0;
+            init_box.box.x1 = x1;
+            init_box.box.y1 = y1;
+            init_box.box.w = w;
+            init_box.box.h = h;
+            init_box.box.cx = cx;
+            init_box.box.cy = cy;
+            init_box.class_id = class_id;
         }
-        std::cout << std::endl;
-        
-        auto scores = tracker.getOutputPredScores();
-        if (!scores.empty()) {
-            std::cout << "Pred Score: " << scores[0] << std::endl;
+
+        // Initialize tracker with the image and bbox
+        if (tracker.init(init_img, init_box) != 0) {
+            std::cerr << "Failed to init tracker with init_img.jpg and ini_box.txt" << std::endl;
+            return -1;
         }
 
+        // Load track image and run tracker
+        cv::Mat track_img = cv::imread("track_img.jpg");
+        if (track_img.empty()) {
+            std::cerr << "Failed to read track_img.jpg or file not found" << std::endl;
+            return -1;
+        }
+
+        const DrOBB &tracked = tracker.track(track_img);
+        std::cout << "Track Result: x0=" << tracked.box.x0 << " y0=" << tracked.box.y0 << " x1=" << tracked.box.x1 << " y1=" << tracked.box.y1 << " w=" << tracked.box.w << " h=" << tracked.box.h << " cx=" << tracked.box.cx << " cy=" << tracked.box.cy << " score=" << tracked.score << " class_id=" << tracked.class_id << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         return -1;

@@ -427,6 +427,8 @@ AclLiteError DataInputThread::MsgRead(shared_ptr<DetectDataMsg> &detectDataMsg)
     detectDataMsg->postId = postproId_;
     detectDataMsg->dataOutputThreadId = dataOutputThreadId_;
     detectDataMsg->rtspDisplayThreadId = rtspDisplayThreadId_;
+    // Set track thread instance id (if configured, otherwise INVALID_INSTANCE_ID)
+    detectDataMsg->trackThreadId = GetAclLiteThreadIdByName(string("track") + to_string(channelId_));
     detectDataMsg->dataInputThreadId = selfThreadId_;
     detectDataMsg->deviceId = deviceId_;
     detectDataMsg->channelId = channelId_;

@@ -72,7 +72,7 @@ struct DetectDataMsg
     int      detectPostThreadId;
     int      dataOutputThreadId;
     int      rtspDisplayThreadId;
-    int      trackThreadId;      // tracking thread id (optional, -1 if unused)
+    int      trackThreadId = INVALID_INSTANCE_ID;      // tracking thread id (optional, -1 if unused)
     int      dataInputThreadId;  // data input thread id for flow control
     int      postId;
     uint32_t deviceId;

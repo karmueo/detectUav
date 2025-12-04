@@ -3,6 +3,7 @@
 
 #include "AclLiteModel.h"
 #include "AclLiteThread.h"
+#include "Params.h"
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include <string>
@@ -160,6 +161,8 @@ class MixformerV2OM : public AclLiteThread
      * @brief 重置最大预测分数
      */
     void resetMaxPredScore();
+
+    AclLiteError MsgSend(std::shared_ptr<DetectDataMsg> detectDataMsg);
 
     /// 归一化常量
     static const float mean_vals[3]; ///< 均值常量

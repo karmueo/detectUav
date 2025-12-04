@@ -23,6 +23,15 @@
 #include "AclLiteImageProc.h"
 #include "AclLiteModel.h"
 #include "AclLiteType.h"
+// Lightweight detection box for cross-thread messaging
+struct DetectionOBB {
+    float x0;
+    float y0;
+    float x1;
+    float y1;
+    float score;
+    int   class_id;
+};
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/imgproc/types_c.h"
 #include "opencv2/opencv.hpp"
@@ -46,6 +55,7 @@ const int MSG_ENCODE_FINISH = 7;
 const int MSG_RTSP_DISPLAY = 8;
 const int MSG_APP_EXIT = 9;
 const int MSG_INFER_DONE = 10;
+const int MSG_TRACK_DATA = 11; // detection -> tracker
 
 const std::string kDataInputName = "dataInput";
 const std::string kPreName = "pre";
@@ -62,6 +72,7 @@ struct DetectDataMsg
     int      detectPostThreadId;
     int      dataOutputThreadId;
     int      rtspDisplayThreadId;
+    int      trackThreadId;      // tracking thread id (optional, -1 if unused)
     int      dataInputThreadId;  // data input thread id for flow control
     int      postId;
     uint32_t deviceId;
@@ -75,6 +86,12 @@ struct DetectDataMsg
     std::vector<cv::Mat>   frame; // original image (BGR) needed by postprocess
     std::vector<InferenceOutput> inferenceOutput; // yolo detect output
     std::vector<std::string>     textPrint;
+    // structured detections (per frame index), single-image pipelines use index 0
+    std::vector<DetectionOBB>    detections;
+    // tracking metadata
+    bool   hasTracking = false;       // whether tracking is active
+    float  trackInitScore = 0.0f;     // detection confidence at init
+    float  trackScore = 0.0f;         // current tracking confidence
 };
 
 #endif

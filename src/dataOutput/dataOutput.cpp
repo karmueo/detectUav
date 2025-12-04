@@ -18,8 +18,11 @@
 */
 #include "dataOutput.h"
 #include "AclLiteApp.h"
+#include "drawing.h"
 #include <chrono>
 #include <sys/time.h>
+#include <iomanip>
+#include <sstream>
 
 using namespace std;
 
@@ -189,6 +192,68 @@ DataOutputThread::ProcessOutput(shared_ptr<DetectDataMsg> detectDataMsg)
                          detectDataMsg->msgNum, latencyMs);
     }
     
+    // 绘制检测/跟踪框到 BGR 与 YUV 图像
+    // 颜色配置与后处理保持一致
+    const std::vector<cv::Scalar> kColors{cv::Scalar(237, 149, 100),
+                                          cv::Scalar(0, 215, 255),
+                                          cv::Scalar(50, 205, 50),
+                                          cv::Scalar(139, 85, 26)};
+
+    if (!detectDataMsg->frame.empty())
+    {
+        // 当有跟踪时：仅显示跟踪框，文字包含初始化置信度和当前跟踪置信度
+        // 当无跟踪时：显示检测框和检测置信度
+        if (detectDataMsg->hasTracking && !detectDataMsg->detections.empty())
+        {
+            const DetectionOBB &t = detectDataMsg->detections.back();
+            cv::Rect rect(cv::Point((int)t.x0, (int)t.y0),
+                          cv::Point((int)t.x1, (int)t.y1));
+            std::stringstream ss;
+            ss << std::fixed << std::setprecision(2)
+               << "init:" << detectDataMsg->trackInitScore
+               << " cur:" << detectDataMsg->trackScore;
+            std::string label = ss.str();
+            // BGR 绘制
+            cv::rectangle(detectDataMsg->frame[0], rect, kColors[0], 2);
+            cv::putText(detectDataMsg->frame[0], label,
+                        cv::Point(rect.x, std::max(0, rect.y - 10)),
+                        cv::FONT_HERSHEY_COMPLEX, 0.5, cv::Scalar(0, 0, 255));
+            // YUV 绘制
+            DrawRect(detectDataMsg->decodedImg[0], rect.x, rect.y,
+                     rect.x + rect.width, rect.y + rect.height,
+                     YUVColor(149, 100, 237), 2);
+            DrawText(detectDataMsg->decodedImg[0], rect.x,
+                     std::max(0, rect.y - 30), label, YUVColor(149, 100, 237),
+                     24, 1.0f);
+        }
+        else if (!detectDataMsg->detections.empty())
+        {
+            // 绘制所有检测框及其置信度
+            for (size_t i = 0; i < detectDataMsg->detections.size(); ++i)
+            {
+                const auto &d = detectDataMsg->detections[i];
+                cv::Rect rect(cv::Point((int)d.x0, (int)d.y0),
+                              cv::Point((int)d.x1, (int)d.y1));
+                std::stringstream ss;
+                ss << std::fixed << std::setprecision(2) << d.score;
+                std::string label = ss.str();
+                cv::Scalar color = kColors[i % kColors.size()];
+                // BGR
+                cv::rectangle(detectDataMsg->frame[0], rect, color, 2);
+                cv::putText(detectDataMsg->frame[0], label,
+                            cv::Point(rect.x, std::max(0, rect.y - 10)),
+                            cv::FONT_HERSHEY_COMPLEX, 0.5, cv::Scalar(0, 0, 255));
+                // YUV
+                YUVColor yuvColor = YUVColor(215, 255, 0);
+                DrawRect(detectDataMsg->decodedImg[0], rect.x, rect.y,
+                         rect.x + rect.width, rect.y + rect.height, yuvColor,
+                         2);
+                DrawText(detectDataMsg->decodedImg[0], rect.x,
+                         std::max(0, rect.y - 30), label, yuvColor, 24, 1.0f);
+            }
+        }
+    }
+
     AclLiteError ret;
     if (outputDataType_ == "video")
     {

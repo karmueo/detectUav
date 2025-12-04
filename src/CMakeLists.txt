@@ -77,6 +77,7 @@ add_executable(main
         dataOutput/dataOutput.cpp
         pushrtsp/pictortsp.cpp
         pushrtsp/pushrtspthread.cpp
+        mixformerv2_om/mixformerv2_om.cpp
         ${LIVE555_SRC}
         main.cpp)
 
@@ -91,4 +92,19 @@ if(USE_LIVE555)
     target_link_libraries(main ${LIVE555_LIBRARIES} crypto ssl)
 endif()
 
-install(TARGETS main DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+add_executable(test_mixformerv2_om
+        mixformerv2_om/mixformerv2_om.cpp
+        test_mixformerv2_om.cpp)
+
+target_sources(test_mixformerv2_om 
+    PUBLIC
+        ${aclLite})
+
+target_link_libraries(test_mixformerv2_om ascendcl acl_dvpp stdc++ pthread ${COMMON_DEPEND_LIB} jsoncpp opencv_highgui opencv_core opencv_imgproc opencv_imgcodecs opencv_calib3d opencv_features2d opencv_videoio dl rt X11 Freetype::Freetype)
+
+if(USE_LIVE555)
+    # live555 depends on OpenSSL crypto
+    target_link_libraries(test_mixformerv2_om ${LIVE555_LIBRARIES} crypto ssl)
+endif()
+
+install(TARGETS test_mixformerv2_om DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})

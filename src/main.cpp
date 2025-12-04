@@ -27,6 +27,7 @@
 #include "detectInference/detectInference.h"
 #include "detectPostprocess/detectPostprocess.h"
 #include "detectPreprocess/detectPreprocess.h"
+#include "mixformerv2_om/mixformerv2_om.h"
 #include "pushrtsp/pushrtspthread.h"
 #include <cstdlib>
 #include <dirent.h>
@@ -234,6 +235,16 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                         detectPostParam.runMode = runMode;
                         threadTbl.push_back(detectPostParam);
                     }
+
+                    // 创建单目标跟踪线程（MixformerV2OM），每个通道一个实例
+                    string trackName = string("track") + to_string(channelId);
+                    AclLiteThreadParam trackParam;
+                    trackParam.threadInst = new MixformerV2OM(""); // 使用默认模型路径
+                    trackParam.threadInstName.assign(trackName.c_str());
+                    trackParam.context = context;
+                    trackParam.runMode = runMode;
+                    trackParam.queueSize = kMsgQueueSize;
+                    threadTbl.push_back(trackParam);
 
                     AclLiteThreadParam dataOutputParam;
                     dataOutputParam.threadInst = new DataOutputThread(

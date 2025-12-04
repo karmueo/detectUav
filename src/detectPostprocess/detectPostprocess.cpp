@@ -276,6 +276,20 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
         
         for (size_t i = 0; i < result.size(); ++i)
         {
+            // 将结构化检测结果写入 DetectDataMsg.detections，供跟踪线程使用
+            DetectionOBB det;
+            float x1_det = result[i].x - result[i].width / half;
+            float y1_det = result[i].y - result[i].height / half;
+            float x2_det = result[i].x + result[i].width / half;
+            float y2_det = result[i].y + result[i].height / half;
+            det.x0 = x1_det;
+            det.y0 = y1_det;
+            det.x1 = x2_det;
+            det.y1 = y2_det;
+            det.score = result[i].score;
+            det.class_id = static_cast<int>(result[i].classIndex);
+            detectDataMsg->detections.push_back(det);
+
             leftTopPoint.x = result[i].x - result[i].width / half;
             leftTopPoint.y = result[i].y - result[i].height / half;
             rightBottomPoint.x = result[i].x + result[i].width / half;
@@ -338,10 +352,17 @@ DetectPostprocessThread::MsgSend(shared_ptr<DetectDataMsg> detectDataMsg)
 {
     if (!sendLastBatch_)
     {
+        int targetThreadId = detectDataMsg->dataOutputThreadId;
+        int targetMsgId = MSG_OUTPUT_FRAME;
+        if (detectDataMsg->trackThreadId >= 0)
+        {
+            targetThreadId = detectDataMsg->trackThreadId;
+            targetMsgId = MSG_TRACK_DATA;
+        }
         while (1)
         {
-            AclLiteError ret = SendMessage(detectDataMsg->dataOutputThreadId,
-                                           MSG_OUTPUT_FRAME,
+            AclLiteError ret = SendMessage(targetThreadId,
+                                           targetMsgId,
                                            detectDataMsg);
             if (ret == ACLLITE_ERROR_ENQUEUE)
             {

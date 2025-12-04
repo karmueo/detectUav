@@ -8,6 +8,7 @@ SOURCE_ACL="./src/acl.json"
 SOURCE_TEST="./scripts/test.json"
 SOURCE_DATA="./data"
 SOURCE_MODEL="./model"
+SOURCE_ATC_MIXFORMER="./scripts/atc_mixformer.sh"
 REMOTE_USER="root"
 REMOTE_HOST="192.168.1.111"
 REMOTE_PATH="/root/work/yolov11_cann_video"
@@ -48,6 +49,11 @@ if [ ! -d "$SOURCE_MODEL" ]; then
     exit 1
 fi
 
+if [ ! -f "$SOURCE_ATC_MIXFORMER" ]; then
+    echo "错误: 源文件 $SOURCE_ATC_MIXFORMER 不存在"
+    exit 1
+fi
+
 # 同步文件到远程服务器
 echo "正在同步文件到 $REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH"
 rsync -avz "$SOURCE_FILE" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH"
@@ -57,6 +63,7 @@ rsync -avz "$SOURCE_ACL" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH"
 rsync -avz "$SOURCE_TEST" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH"
 rsync -avz "$SOURCE_DATA" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH"
 rsync -avz "$SOURCE_MODEL" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH"
+rsync -avz "$SOURCE_ATC_MIXFORMER" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH"
 
 # 检查同步是否成功
 if [ $? -eq 0 ]; then

@@ -27,7 +27,7 @@
 #include "detectInference/detectInference.h"
 #include "detectPostprocess/detectPostprocess.h"
 #include "detectPreprocess/detectPreprocess.h"
-#include "mixformerv2_om/mixformerv2_om.h"
+#include "tracking/tracking.h"
 #include "pushrtsp/pushrtspthread.h"
 #include <cstdlib>
 #include <dirent.h>
@@ -236,7 +236,7 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                         threadTbl.push_back(detectPostParam);
                     }
 
-                    // 创建单目标跟踪线程（MixformerV2OM），每个通道一个实例
+                    // 创建单目标跟踪线程（Tracking），每个通道一个实例
                     // 读取跟踪模型路径
                     string trackModelPath = "";
                     if (root["device_config"][i]["model_config"][j]["io_info"][k]["track_model_path"].type() != Json::nullValue)
@@ -246,7 +246,7 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                     
                     string trackName = string("track") + to_string(channelId);
                     AclLiteThreadParam trackParam;
-                    trackParam.threadInst = new MixformerV2OM(trackModelPath); // 使用配置文件中的模型路径
+                    trackParam.threadInst = new Tracking(trackModelPath); // 使用配置文件中的模型路径
                     trackParam.threadInstName.assign(trackName.c_str());
                     trackParam.context = context;
                     trackParam.runMode = runMode;

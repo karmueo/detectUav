@@ -1,5 +1,5 @@
-#ifndef MIXFORMERV2_OM_H
-#define MIXFORMERV2_OM_H
+#ifndef TRACKING_H
+#define TRACKING_H
 
 #include "AclLiteModel.h"
 #include "AclLiteThread.h"
@@ -28,19 +28,19 @@ struct DrOBB
     int    class_id; ///< 类别 ID
 };
 
-class MixformerV2OM : public AclLiteThread
+class Tracking : public AclLiteThread
 {
   public:
     /**
      * @brief 构造函数
      * @param model_path 输入：OM 模型文件路径
      */
-    MixformerV2OM(const std::string &model_path);
+    Tracking(const std::string &model_path);
 
     /**
      * @brief 析构函数
      */
-    ~MixformerV2OM();
+    ~Tracking();
 
     /**
      * @brief 初始化模型
@@ -261,4 +261,4 @@ class MixformerV2OM : public AclLiteThread
     bool         tracking_initialized_ = false; ///< 跟踪是否已初始化
 };
 
-#endif // MIXFORMERV2_OM_H
+#endif // TRACKING_H

@@ -16,7 +16,8 @@
                             "input_type":"rtsp",
                             "output_path":"rtsp://192.168.1.80/live/uav",
                             "output_type":"rtsp",
-                            "channel_id":0
+                            "channel_id":0,
+                            "track_model_path":"./model/mixformerv2_online_small_bs1.om"
                         }
                     ]
                 }

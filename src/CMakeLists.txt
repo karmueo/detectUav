@@ -77,7 +77,7 @@ add_executable(main
         dataOutput/dataOutput.cpp
         pushrtsp/pictortsp.cpp
         pushrtsp/pushrtspthread.cpp
-        mixformerv2_om/mixformerv2_om.cpp
+        tracking/tracking.cpp
         ${LIVE555_SRC}
         main.cpp)
 
@@ -93,7 +93,7 @@ if(USE_LIVE555)
 endif()
 
 add_executable(test_mixformerv2_om
-        mixformerv2_om/mixformerv2_om.cpp
+    tracking/tracking.cpp
         test_mixformerv2_om.cpp)
 
 target_sources(test_mixformerv2_om 

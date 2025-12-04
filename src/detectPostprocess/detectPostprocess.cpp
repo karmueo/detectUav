@@ -4,7 +4,6 @@
 #include "AclLiteUtils.h"
 #include "Params.h"
 #include "label.h"
-#include "drawing.h"
 #include <cstddef>
 #include <iostream>
 #include <iomanip>
@@ -15,10 +14,6 @@ using namespace std;
 namespace
 {
 const uint32_t           kSleepTime = 500;
-const double             kFountScale = 0.5;
-const cv::Scalar         kFountColor(0, 0, 255);
-const uint32_t           kLabelOffset = 11;
-const uint32_t           kLineSolid = 2;
 const vector<cv::Scalar> kColors{cv::Scalar(237, 149, 100),
                                  cv::Scalar(0, 215, 255),
                                  cv::Scalar(50, 205, 50),
@@ -79,7 +74,7 @@ AclLiteError DetectPostprocessThread::Process(int msgId, shared_ptr<void> data)
     if (msgId == MSG_POSTPROC_DETECTDATA) {
         static int logCount = 0;
         if (++logCount % 30 == 0) {
-            ACLLITE_LOG_INFO("[DetectPostprocessThread] Process time: %ld ms", duration);
+            ACLLITE_LOG_INFO("[%s] Process time: %ld ms", SelfInstanceName().c_str(), duration);
         }
     }
 
@@ -266,17 +261,9 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
         sstream >> textHead;
         string textMid = "[";
         
-        // 定义 YUV 颜色数组（对应不同类别）
-        const YUVColor yuvColors[] = {
-            YUVColor(149, 100, 237),  // 紫色系
-            YUVColor(215, 255, 0),    // 青色系
-            YUVColor(205, 50, 50),    // 绿色系
-            YUVColor(85, 26, 139)     // 棕色系
-        };
-        
         for (size_t i = 0; i < result.size(); ++i)
         {
-            // 将结构化检测结果写入 DetectDataMsg.detections，供跟踪线程使用
+            // Store structured detection results in DetectDataMsg.detections for tracking
             DetectionOBB det;
             float x1_det = result[i].x - result[i].width / half;
             float y1_det = result[i].y - result[i].height / half;
@@ -295,33 +282,12 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
             rightBottomPoint.x = result[i].x + result[i].width / half;
             rightBottomPoint.y = result[i].y + result[i].height / half;
             
-            // 格式化置信度为2位小数
+            // Format confidence score to 2 decimal places
             std::stringstream ss;
             ss << std::fixed << std::setprecision(2) << result[i].score;
             std::string scoreStr = ss.str();
             
             className = label[result[i].classIndex] + ":" + scoreStr;
-            
-            // 在 YUV420SP 图像上也绘制检测框
-            DrawRect(
-                detectDataMsg->decodedImg[n],
-                leftTopPoint.x,
-                leftTopPoint.y,
-                rightBottomPoint.x,
-                rightBottomPoint.y,
-                yuvColors[result[i].classIndex % 4],
-                kLineSolid);
-            
-            // 在检测框上方绘制文字（类别和置信度）
-            DrawText(
-                detectDataMsg->decodedImg[n],
-                leftTopPoint.x,
-                leftTopPoint.y - 30,  // 上方30像素，避免覆盖检测框
-                className,
-                yuvColors[result[i].classIndex % 4],
-                24,  // 字体大小
-                1.0f // 透明度
-            );
             
             textMid = textMid + className + " ";
         }

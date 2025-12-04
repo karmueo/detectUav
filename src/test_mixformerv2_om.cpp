@@ -1,4 +1,4 @@
-#include "mixformerv2_om/mixformerv2_om.h"
+#include "tracking/tracking.h"
 #include "AclLiteResource.h"
 #include <iostream>
 #include <fstream>
@@ -202,7 +202,7 @@ int main() {
 
     // Note: This test reads init_img.jpg / ini_box.txt and track_img.jpg
 
-    MixformerV2OM tracker("./model/mixformerv2_online_small_bs1.om");
+    Tracking tracker("./model/mixformerv2_online_small_bs1.om");
     if (tracker.InitModel() != 0) {
         std::cerr << "Failed to init model" << std::endl;
         return -1;

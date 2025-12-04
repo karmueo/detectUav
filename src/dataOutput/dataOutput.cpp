@@ -21,8 +21,7 @@
 #include "drawing.h"
 #include <chrono>
 #include <sys/time.h>
-#include <iomanip>
-#include <sstream>
+#include <cstdio>
 
 using namespace std;
 
@@ -192,64 +191,47 @@ DataOutputThread::ProcessOutput(shared_ptr<DetectDataMsg> detectDataMsg)
                          detectDataMsg->msgNum, latencyMs);
     }
     
-    // 绘制检测/跟踪框到 BGR 与 YUV 图像
-    // 颜色配置与后处理保持一致
-    const std::vector<cv::Scalar> kColors{cv::Scalar(237, 149, 100),
-                                          cv::Scalar(0, 215, 255),
-                                          cv::Scalar(50, 205, 50),
-                                          cv::Scalar(139, 85, 26)};
+    // YUV color map for drawing (only draw on YUV, no BGR drawing)
+    static const YUVColor kYUVColorTracking = YUVColor(149, 100, 237);  // Purple for tracking
+    static const YUVColor kYUVColorDetection = YUVColor(215, 255, 0);   // Cyan for detections
 
-    if (!detectDataMsg->frame.empty())
+    if (!detectDataMsg->decodedImg.empty())
     {
-        // 当有跟踪时：仅显示跟踪框，文字包含初始化置信度和当前跟踪置信度
-        // 当无跟踪时：显示检测框和检测置信度
-        if (detectDataMsg->hasTracking && !detectDataMsg->detections.empty())
+        // If tracking is active: only draw tracking box and text
+        // Otherwise: draw all detection boxes and text
+        if (detectDataMsg->trackingResult.isTracked)
         {
-            const DetectionOBB &t = detectDataMsg->detections.back();
-            cv::Rect rect(cv::Point((int)t.x0, (int)t.y0),
-                          cv::Point((int)t.x1, (int)t.y1));
-            std::stringstream ss;
-            ss << std::fixed << std::setprecision(2)
-               << "init:" << detectDataMsg->trackInitScore
-               << " cur:" << detectDataMsg->trackScore;
-            std::string label = ss.str();
-            // BGR 绘制
-            cv::rectangle(detectDataMsg->frame[0], rect, kColors[0], 2);
-            cv::putText(detectDataMsg->frame[0], label,
-                        cv::Point(rect.x, std::max(0, rect.y - 10)),
-                        cv::FONT_HERSHEY_COMPLEX, 0.5, cv::Scalar(0, 0, 255));
-            // YUV 绘制
-            DrawRect(detectDataMsg->decodedImg[0], rect.x, rect.y,
-                     rect.x + rect.width, rect.y + rect.height,
-                     YUVColor(149, 100, 237), 2);
-            DrawText(detectDataMsg->decodedImg[0], rect.x,
-                     std::max(0, rect.y - 30), label, YUVColor(149, 100, 237),
-                     24, 1.0f);
+            const DetectionOBB &t = detectDataMsg->trackingResult.bbox;
+            char label[64];
+            snprintf(label, sizeof(label), "init:%.2f cur:%.2f",
+                     detectDataMsg->trackingResult.initScore,
+                     detectDataMsg->trackingResult.curScore);
+            
+            // Draw on YUV only (no BGR drawing)
+            DrawRect(detectDataMsg->decodedImg[0],
+                     (int)t.x0, (int)t.y0,
+                     (int)t.x1, (int)t.y1,
+                     kYUVColorTracking, 2);
+            DrawText(detectDataMsg->decodedImg[0],
+                     (int)t.x0, std::max(0, (int)t.y0 - 30),
+                     label, kYUVColorTracking, 24, 1.0f);
         }
         else if (!detectDataMsg->detections.empty())
         {
-            // 绘制所有检测框及其置信度
+            // Draw all detections on YUV only (no BGR drawing)
             for (size_t i = 0; i < detectDataMsg->detections.size(); ++i)
             {
                 const auto &d = detectDataMsg->detections[i];
-                cv::Rect rect(cv::Point((int)d.x0, (int)d.y0),
-                              cv::Point((int)d.x1, (int)d.y1));
-                std::stringstream ss;
-                ss << std::fixed << std::setprecision(2) << d.score;
-                std::string label = ss.str();
-                cv::Scalar color = kColors[i % kColors.size()];
-                // BGR
-                cv::rectangle(detectDataMsg->frame[0], rect, color, 2);
-                cv::putText(detectDataMsg->frame[0], label,
-                            cv::Point(rect.x, std::max(0, rect.y - 10)),
-                            cv::FONT_HERSHEY_COMPLEX, 0.5, cv::Scalar(0, 0, 255));
-                // YUV
-                YUVColor yuvColor = YUVColor(215, 255, 0);
-                DrawRect(detectDataMsg->decodedImg[0], rect.x, rect.y,
-                         rect.x + rect.width, rect.y + rect.height, yuvColor,
-                         2);
-                DrawText(detectDataMsg->decodedImg[0], rect.x,
-                         std::max(0, rect.y - 30), label, yuvColor, 24, 1.0f);
+                char label[32];
+                snprintf(label, sizeof(label), "%.2f", d.score);
+                
+                DrawRect(detectDataMsg->decodedImg[0],
+                         (int)d.x0, (int)d.y0,
+                         (int)d.x1, (int)d.y1,
+                         kYUVColorDetection, 2);
+                DrawText(detectDataMsg->decodedImg[0],
+                         (int)d.x0, std::max(0, (int)d.y0 - 30),
+                         label, kYUVColorDetection, 24, 1.0f);
             }
         }
     }
@@ -310,15 +292,19 @@ DataOutputThread::ProcessOutput(shared_ptr<DetectDataMsg> detectDataMsg)
 AclLiteError
 DataOutputThread::SaveResultVideo(shared_ptr<DetectDataMsg> &detectDataMsg)
 {
+    // Pre-allocate resized Mat to avoid per-frame allocation
+    static cv::Mat resizedFrame;
+    if (resizedFrame.empty() || resizedFrame.rows != (int)kOutputHeigth || 
+        resizedFrame.cols != (int)kOutputWidth) {
+        resizedFrame = cv::Mat((int)kOutputHeigth, (int)kOutputWidth, CV_8UC3);
+    }
+    
     for (int i = 0; i < detectDataMsg->frame.size(); i++)
     {
-        cv::resize(detectDataMsg->frame[i],
-                   detectDataMsg->frame[i],
+        cv::resize(detectDataMsg->frame[i], resizedFrame,
                    cv::Size(kOutputWidth, kOutputHeigth),
-                   0,
-                   0,
-                   cv::INTER_LINEAR);
-        outputVideo_ << detectDataMsg->frame[i];
+                   0, 0, cv::INTER_LINEAR);
+        outputVideo_ << resizedFrame;
     }
     return ACLLITE_OK;
 }
@@ -326,13 +312,14 @@ DataOutputThread::SaveResultVideo(shared_ptr<DetectDataMsg> &detectDataMsg)
 AclLiteError
 DataOutputThread::SaveResultPic(shared_ptr<DetectDataMsg> &detectDataMsg)
 {
+    // Use static char buffer to avoid repeated string allocations
+    static char filepath[256];
+    
     for (int i = 0; i < detectDataMsg->frame.size(); i++)
     {
-        stringstream sstream;
-        sstream.str("");
-        sstream << "../out/channel_" << detectDataMsg->channelId << "_out_pic_"
-                << detectDataMsg->msgNum << i << ".jpg";
-        cv::imwrite(sstream.str(), detectDataMsg->frame[i]);
+        snprintf(filepath, sizeof(filepath), "../out/channel_%d_out_pic_%d%d.jpg",
+                 detectDataMsg->channelId, detectDataMsg->msgNum, i);
+        cv::imwrite(filepath, detectDataMsg->frame[i]);
     }
     return ACLLITE_OK;
 }
@@ -378,12 +365,18 @@ DataOutputThread::PrintResult(shared_ptr<DetectDataMsg> &detectDataMsg)
 AclLiteError
 DataOutputThread::SendCVImshow(shared_ptr<DetectDataMsg> &detectDataMsg)
 {
+    // Pre-allocate resized Mat to avoid per-frame allocation
+    static cv::Mat resizedFrame;
+    if (resizedFrame.empty() || resizedFrame.rows != (int)kOutputHeigth || 
+        resizedFrame.cols != (int)kOutputWidth) {
+        resizedFrame = cv::Mat((int)kOutputHeigth, (int)kOutputWidth, CV_8UC3);
+    }
+    
     for (int i = 0; i < detectDataMsg->frame.size(); i++)
     {
-        cv::resize(detectDataMsg->frame[i],
-                   detectDataMsg->frame[i],
+        cv::resize(detectDataMsg->frame[i], resizedFrame,
                    cv::Size(kOutputWidth, kOutputHeigth));
-        cv::imshow("frame", detectDataMsg->frame[i]);
+        cv::imshow("frame", resizedFrame);
         cv::waitKey(kWaitTime);
     }
     return ACLLITE_OK;

@@ -32,6 +32,15 @@ struct DetectionOBB {
     float score;
     int   class_id;
 };
+
+// Tracking result structure (single-target tracking)
+struct TrackInfo {
+    DetectionOBB bbox;        // tracked bounding box (x0,y0,x1,y1,score,class_id)
+    bool isTracked = false;   // whether tracking is active
+    float initScore = 0.0f;   // detection confidence at initialization
+    float curScore = 0.0f;    // current tracking confidence
+    int trackId = -1;         // tracking ID (reserved for multi-target tracking)
+};
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/imgproc/types_c.h"
 #include "opencv2/opencv.hpp"
@@ -60,7 +69,7 @@ const int MSG_TRACK_DATA = 11; // detection -> tracker
 const std::string kDataInputName = "dataInput";
 const std::string kPreName = "pre";
 const std::string kInferName = "infer";
-const std::string kPostName = "post";
+const std::string kPostName = "detectPost";
 const std::string kDataOutputName = "dataOutput";
 const std::string kRtspDisplayName = "rtspDisplay";
 } // namespace
@@ -88,7 +97,9 @@ struct DetectDataMsg
     std::vector<std::string>     textPrint;
     // structured detections (per frame index), single-image pipelines use index 0
     std::vector<DetectionOBB>    detections;
-    // tracking metadata
+    // tracking result (NEW: stores single tracked target per frame)
+    TrackInfo                    trackingResult;
+    // tracking metadata (kept for backward compatibility)
     bool   hasTracking = false;       // whether tracking is active
     float  trackInitScore = 0.0f;     // detection confidence at init
     float  trackScore = 0.0f;         // current tracking confidence

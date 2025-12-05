@@ -19,6 +19,7 @@
 #include "dataOutput.h"
 #include "AclLiteApp.h"
 #include "drawing.h"
+#include "label.h"
 #include <chrono>
 #include <sys/time.h>
 #include <cstdio>
@@ -202,9 +203,30 @@ DataOutputThread::ProcessOutput(shared_ptr<DetectDataMsg> detectDataMsg)
         if (detectDataMsg->trackingResult.isTracked)
         {
             const DetectionOBB &t = detectDataMsg->trackingResult.bbox;
-            char label[64];
-            snprintf(label, sizeof(label), "init:%.2f cur:%.2f",
-                     detectDataMsg->trackingResult.initScore,
+            // If a detection in the current frame matches the tracked bbox,
+            // prefer the detection's class and score; otherwise use the
+            // initialized detection confidence and class stored in trackingResult.
+            int chosen_class_id = t.class_id;
+            // Attempt to find matching detection in the detections list
+            for (size_t di = 0; di < detectDataMsg->detections.size(); ++di) {
+                const auto &d = detectDataMsg->detections[di];
+                float tracked_cx = (t.x0 + t.x1) * 0.5f;
+                float tracked_cy = (t.y0 + t.y1) * 0.5f;
+                if (d.x0 <= tracked_cx && tracked_cx <= d.x1 &&
+                    d.y0 <= tracked_cy && tracked_cy <= d.y1) {
+                    chosen_class_id = d.class_id;
+                    break;
+                }
+            }
+
+            const size_t labelCount = sizeof(::label) / sizeof(::label[0]);
+            const std::string className =
+                (chosen_class_id >= 0 && chosen_class_id < (int)labelCount) ?
+                    ::label[chosen_class_id] : std::to_string(chosen_class_id);
+            char labelText[128];
+            // Only show class and current tracking confidence (curScore). Do not show initial detection confidence.
+            snprintf(labelText, sizeof(labelText), "%s-%.2f",
+                     className.c_str(),
                      detectDataMsg->trackingResult.curScore);
             
             // Draw on YUV only (no BGR drawing)
@@ -214,16 +236,20 @@ DataOutputThread::ProcessOutput(shared_ptr<DetectDataMsg> detectDataMsg)
                      kYUVColorTracking, 2);
             DrawText(detectDataMsg->decodedImg[0],
                      (int)t.x0, std::max(0, (int)t.y0 - 30),
-                     label, kYUVColorTracking, 24, 1.0f);
+                     labelText, kYUVColorTracking, 24, 1.0f);
         }
         else if (!detectDataMsg->detections.empty())
         {
             // Draw all detections on YUV only (no BGR drawing)
+            const size_t labelCount = sizeof(::label) / sizeof(::label[0]);
             for (size_t i = 0; i < detectDataMsg->detections.size(); ++i)
             {
                 const auto &d = detectDataMsg->detections[i];
-                char label[32];
-                snprintf(label, sizeof(label), "%.2f", d.score);
+                const std::string detClassName =
+                    (d.class_id >= 0 && d.class_id < (int)labelCount) ?
+                        ::label[d.class_id] : std::to_string(d.class_id);
+                char labelText[64];
+                snprintf(labelText, sizeof(labelText), "%s-%.2f", detClassName.c_str(), d.score);
                 
                 DrawRect(detectDataMsg->decodedImg[0],
                          (int)d.x0, (int)d.y0,
@@ -231,7 +257,7 @@ DataOutputThread::ProcessOutput(shared_ptr<DetectDataMsg> detectDataMsg)
                          kYUVColorDetection, 2);
                 DrawText(detectDataMsg->decodedImg[0],
                          (int)d.x0, std::max(0, (int)d.y0 - 30),
-                         label, kYUVColorDetection, 24, 1.0f);
+                         labelText, kYUVColorDetection, 24, 1.0f);
             }
         }
     }

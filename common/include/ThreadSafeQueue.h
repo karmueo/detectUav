@@ -130,6 +130,18 @@ template <typename T> class ThreadSafeQueue
             newSize > kMaxQueueCapacity ? newSize : kMaxQueueCapacity;
     }
 
+    /**
+     * @brief clear all data in queue
+     */
+    void Clear()
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        while (!queue_.empty())
+        {
+            queue_.pop();
+        }
+    }
+
   private:
     std::queue<T>      queue_;                     // the queue
     uint32_t           queueCapacity;              // queue capacity

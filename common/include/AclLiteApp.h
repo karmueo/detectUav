@@ -64,6 +64,8 @@ class AclLiteApp
     void         WaitEnd() { waitEnd_ = true; }
     void         Exit();
     void         PrintQueueStatus();
+    void         ClearThreadQueue(int threadId);
+
 
   private:
     AclLiteError Init();

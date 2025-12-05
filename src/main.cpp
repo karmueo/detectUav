@@ -245,8 +245,44 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                     }
                     
                     string trackName = string("track") + to_string(channelId);
+                    Tracking* trackingInst = new Tracking(trackModelPath); // 使用配置文件中的模型路径
+                    
+                    // 读取并设置跟踪配置参数
+                    if (root["device_config"][i]["model_config"][j]["io_info"][k]["tracking_config"].type() != Json::nullValue)
+                    {
+                        Json::Value trackingConfig = root["device_config"][i]["model_config"][j]["io_info"][k]["tracking_config"];
+                        
+                        if (trackingConfig["confidence_active_threshold"].type() != Json::nullValue)
+                        {
+                            float threshold = trackingConfig["confidence_active_threshold"].asFloat();
+                            trackingInst->setConfidenceActiveThreshold(threshold);
+                            ACLLITE_LOG_INFO("Set tracking confidence_active_threshold=%.2f for channel %d", threshold, channelId);
+                        }
+                        
+                        if (trackingConfig["confidence_redetect_threshold"].type() != Json::nullValue)
+                        {
+                            float threshold = trackingConfig["confidence_redetect_threshold"].asFloat();
+                            trackingInst->setConfidenceRedetectThreshold(threshold);
+                            ACLLITE_LOG_INFO("Set tracking confidence_redetect_threshold=%.2f for channel %d", threshold, channelId);
+                        }
+                        
+                        if (trackingConfig["max_track_loss_frames"].type() != Json::nullValue)
+                        {
+                            int maxLossFrames = trackingConfig["max_track_loss_frames"].asInt();
+                            trackingInst->setMaxTrackLossFrames(maxLossFrames);
+                            ACLLITE_LOG_INFO("Set tracking max_track_loss_frames=%d for channel %d", maxLossFrames, channelId);
+                        }
+                        
+                        if (trackingConfig["score_decay_factor"].type() != Json::nullValue)
+                        {
+                            float decay = trackingConfig["score_decay_factor"].asFloat();
+                            trackingInst->setMaxScoreDecay(decay);
+                            ACLLITE_LOG_INFO("Set tracking score_decay_factor=%.2f for channel %d", decay, channelId);
+                        }
+                    }
+                    
                     AclLiteThreadParam trackParam;
-                    trackParam.threadInst = new Tracking(trackModelPath); // 使用配置文件中的模型路径
+                    trackParam.threadInst = trackingInst;
                     trackParam.threadInstName.assign(trackName.c_str());
                     trackParam.context = context;
                     trackParam.runMode = runMode;

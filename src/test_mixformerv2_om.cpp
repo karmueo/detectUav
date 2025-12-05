@@ -220,6 +220,7 @@ int main() {
         // Only x0,y0,x1,y1 (and optional class_id) are read from file. w,h,cx,cy are recomputed.
         DrOBB init_box;
         init_box.score = 1.0f;
+        init_box.initScore = init_box.score;
         init_box.class_id = 0;
         {
             std::ifstream bbox_file("ini_box.txt");

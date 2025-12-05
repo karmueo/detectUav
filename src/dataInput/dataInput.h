@@ -87,6 +87,13 @@ class DataInputThread : public AclLiteThread
     int64_t waitTime_;
     int     framesPerSecond_;
     int     frameSkip_;  // 跳帧参数:每frameSkip帧处理1帧,默认2
+    
+    // ============ 跟踪状态管理 ============
+    int     trackThreadId_;              // 跟踪线程id
+    bool    isTrackingActive_;           // 当前跟踪是否活跃
+    float   currentTrackingConfidence_;  // 当前跟踪置信度
+    bool    isFirstFrame_;               // 是否是第一帧(首帧必须进行检测)
+    bool    lastIsTrackingMode_;          // 用于记录上一次是否在跟踪模式, 仅在状态切换时打印日志
 };
 
 #endif

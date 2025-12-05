@@ -18,7 +18,6 @@ const vector<cv::Scalar> kColors{cv::Scalar(237, 149, 100),
                                  cv::Scalar(0, 215, 255),
                                  cv::Scalar(50, 205, 50),
                                  cv::Scalar(139, 85, 26)};
-const uint32_t           kNumPredictions = 34000;
 const float              kConfThresh = 0.25f;
 const float              kNmsThresh = 0.45f;
 const uint32_t           kNumClasses = 2;
@@ -84,21 +83,26 @@ AclLiteError DetectPostprocessThread::Process(int msgId, shared_ptr<void> data)
 AclLiteError DetectPostprocessThread::InferOutputProcess(
     shared_ptr<DetectDataMsg> detectDataMsg)
 {
-    size_t pos = 0;
+    // OPTIMIZATION: Single batch copy to host (Step 2) instead of per-frame copy
+    void *hostAllBuffer =
+        CopyDataToHost(detectDataMsg->inferenceOutput[0].data.get(),
+                       detectDataMsg->inferenceOutput[0].size,
+                       runMode_,
+                       MEMORY_NORMAL);
+    if (hostAllBuffer == nullptr)
+    {
+        ACLLITE_LOG_ERROR("Copy inference output to host failed");
+        return ACLLITE_ERROR_COPY_DATA;
+    }
+    
+    float *hostBuff = static_cast<float *>(hostAllBuffer);
+    size_t floatsPerFrame = (detectDataMsg->inferenceOutput[0].size / batch_) / sizeof(float);
+    const uint32_t kNumChannels = 6; // cx, cy, w, h, conf_class0, conf_class1
+    uint32_t numPredictionsPerFrame = (floatsPerFrame > 0) ? floatsPerFrame / kNumChannels : 0;
+    
     for (size_t n = 0; n < detectDataMsg->decodedImg.size(); n++)
     {
-        void *dataBuffer =
-            CopyDataToHost((char*)detectDataMsg->inferenceOutput[0].data.get() + pos,
-                           detectDataMsg->inferenceOutput[0].size / batch_,
-                           runMode_,
-                           MEMORY_NORMAL);
-        if (dataBuffer == nullptr)
-        {
-            ACLLITE_LOG_ERROR("Copy inference output to host failed");
-            return ACLLITE_ERROR_COPY_DATA;
-        }
-        pos = pos + detectDataMsg->inferenceOutput[0].size / batch_;
-        float *detectBuff = static_cast<float *>(dataBuffer);
+        float *detectBuff = hostBuff + n * floatsPerFrame;
 
         // YOLOv7 model output: [batch, 6, 8400]
         // 6 channels: cx, cy, w, h, conf_class0, conf_class1
@@ -121,19 +125,21 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
         float padTop = (modelHeight_ - resizedHeight) / 2.0f;
 
         // filter boxes by confidence threshold
+        // OPTIMIZATION: Pre-allocate vector (Step 5) to reduce allocations
         vector<BoundBox> boxes;
+        boxes.reserve(std::min((size_t)1000, (size_t)numPredictionsPerFrame)); // reserve common detection count
         
-        for (uint32_t i = 0; i < kNumPredictions; ++i)
+        for (uint32_t i = 0; i < numPredictionsPerFrame; ++i)
         {
             // Extract center coordinates and dimensions (in model input image size)
-            float cx = detectBuff[0 * kNumPredictions + i];
-            float cy = detectBuff[1 * kNumPredictions + i];
-            float w = detectBuff[2 * kNumPredictions + i];
-            float h = detectBuff[3 * kNumPredictions + i];
+            float cx = detectBuff[0 * numPredictionsPerFrame + i];
+            float cy = detectBuff[1 * numPredictionsPerFrame + i];
+            float w = detectBuff[2 * numPredictionsPerFrame + i];
+            float h = detectBuff[3 * numPredictionsPerFrame + i];
 
             // Extract confidence scores for two classes
-            float conf0 = detectBuff[4 * kNumPredictions + i];
-            float conf1 = detectBuff[5 * kNumPredictions + i];
+            float conf0 = detectBuff[4 * numPredictionsPerFrame + i];
+            float conf1 = detectBuff[5 * numPredictionsPerFrame + i];
 
             // Select the class with higher confidence
             float score;
@@ -188,58 +194,49 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
         }
 
         // filter boxes by NMS
+        // OPTIMIZATION: Index-based NMS (Step 4) to avoid expensive vector::erase operations
         vector<BoundBox> result;
-        result.clear();
-        std::sort(boxes.begin(), boxes.end(), sortScore);
-        BoundBox boxMax;
-        BoundBox boxCompare;
-        while (boxes.size() != 0)
+        result.reserve(boxes.size()); // pre-allocate (Step 5)
+        
+        if (!boxes.empty())
         {
-            size_t index = 1;
-            result.push_back(boxes[0]);
-            while (boxes.size() > index)
+            std::sort(boxes.begin(), boxes.end(), sortScore);
+            
+            // Use suppression flags instead of erasing elements
+            vector<bool> suppressed(boxes.size(), false);
+            
+            for (size_t i = 0; i < boxes.size(); ++i)
             {
-                boxMax.score = boxes[0].score;
-                boxMax.classIndex = boxes[0].classIndex;
-                boxMax.index = boxes[0].index;
-
-                boxMax.x = boxes[0].x;
-                boxMax.y = boxes[0].y;
-                boxMax.width = boxes[0].width;
-                boxMax.height = boxes[0].height;
-
-                boxCompare.score = boxes[index].score;
-                boxCompare.classIndex = boxes[index].classIndex;
-                boxCompare.index = boxes[index].index;
-
-                boxCompare.x = boxes[index].x;
-                boxCompare.y = boxes[index].y;
-                boxCompare.width = boxes[index].width;
-                boxCompare.height = boxes[index].height;
-
-                // the overlapping part of the two boxes
-                float xLeft = max(boxMax.x, boxCompare.x);
-                float yTop = max(boxMax.y, boxCompare.y);
-                float xRight = min(boxMax.x + boxMax.width,
-                                   boxCompare.x + boxCompare.width);
-                float yBottom = min(boxMax.y + boxMax.height,
-                                    boxCompare.y + boxCompare.height);
-                float width = max(0.0f, xRight - xLeft);
-                float hight = max(0.0f, yBottom - yTop);
-                float area = width * hight;
-                float iou =
-                    area / (boxMax.width * boxMax.height +
-                            boxCompare.width * boxCompare.height - area);
-
-                // filter boxes by NMS threshold
-                if (iou > kNmsThresh)
+                if (suppressed[i]) continue;
+                
+                result.push_back(boxes[i]);
+                
+                // Suppress boxes with high IoU
+                for (size_t j = i + 1; j < boxes.size(); ++j)
                 {
-                    boxes.erase(boxes.begin() + index);
-                    continue;
+                    if (suppressed[j]) continue;
+                    
+                    // Calculate IoU between boxes[i] and boxes[j]
+                    float xLeft = max(boxes[i].x, boxes[j].x);
+                    float yTop = max(boxes[i].y, boxes[j].y);
+                    float xRight = min(boxes[i].x + boxes[i].width,
+                                       boxes[j].x + boxes[j].width);
+                    float yBottom = min(boxes[i].y + boxes[i].height,
+                                        boxes[j].y + boxes[j].height);
+                    float width = max(0.0f, xRight - xLeft);
+                    float hight = max(0.0f, yBottom - yTop);
+                    float area = width * hight;
+                    float iou =
+                        area / (boxes[i].width * boxes[i].height +
+                                boxes[j].width * boxes[j].height - area);
+                    
+                    // Suppress box if IoU exceeds threshold
+                    if (iou > kNmsThresh)
+                    {
+                        suppressed[j] = true;
+                    }
                 }
-                ++index;
             }
-            boxes.erase(boxes.begin());
         }
 
         // opencv draw label params
@@ -261,6 +258,16 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
         sstream >> textHead;
         string textMid = "[";
         
+        // Pre-allocate detection vectors (Step 5)
+        detectDataMsg->detections.reserve(detectDataMsg->detections.size() + result.size());
+        
+        // ============ 选择最佳检测目标(最接近画面中心且置信度大于阈值) ============
+        DetectionOBB bestDetection;
+        bool hasBestDetection = false;
+        float minDistanceToCenter = std::numeric_limits<float>::max();
+        float imageCenterX = srcWidth / 2.0f;
+        float imageCenterY = srcHeight / 2.0f;
+        
         for (size_t i = 0; i < result.size(); ++i)
         {
             // Store structured detection results in DetectDataMsg.detections for tracking
@@ -276,6 +283,22 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
             det.score = result[i].score;
             det.class_id = static_cast<int>(result[i].classIndex);
             detectDataMsg->detections.push_back(det);
+            
+            // 计算目标中心到画面中心的距离
+            float detCenterX = result[i].x;
+            float detCenterY = result[i].y;
+            float distanceToCenter = std::sqrt(
+                std::pow(detCenterX - imageCenterX, 2) + 
+                std::pow(detCenterY - imageCenterY, 2)
+            );
+            
+            // 选择距离中心最近的目标作为最佳检测
+            if (distanceToCenter < minDistanceToCenter)
+            {
+                minDistanceToCenter = distanceToCenter;
+                bestDetection = det;
+                hasBestDetection = true;
+            }
 
             leftTopPoint.x = result[i].x - result[i].width / half;
             leftTopPoint.y = result[i].y - result[i].height / half;
@@ -291,11 +314,33 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
             
             textMid = textMid + className + " ";
         }
+        
+        // 如果找到最佳检测目标，标记为跟踪初始化目标
+        if (hasBestDetection)
+        {
+            // 将最佳检测目标放在detections数组的首位(方便跟踪模块获取)
+            if (!detectDataMsg->detections.empty())
+            {
+                // 将最佳目标与第一个元素交换
+                for (size_t i = 0; i < detectDataMsg->detections.size(); ++i)
+                {
+                    if (std::abs(detectDataMsg->detections[i].x0 - bestDetection.x0) < 1.0f &&
+                        std::abs(detectDataMsg->detections[i].y0 - bestDetection.y0) < 1.0f)
+                    {
+                        std::swap(detectDataMsg->detections[0], detectDataMsg->detections[i]);
+                        break;
+                    }
+                }
+            }
+        }
+        
         string textPrint = textHead + textMid + "]";
         detectDataMsg->textPrint.push_back(textPrint);
-        free(detectBuff);
-        detectBuff = nullptr;
     }
+    
+    // OPTIMIZATION: Single cleanup for entire batch (Step 1) - use delete[] instead of free
+    delete[] static_cast<uint8_t*>(hostAllBuffer);
+    
     return ACLLITE_OK;
 }
 

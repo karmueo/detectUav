@@ -142,6 +142,28 @@ AclLiteError Tracking::Init()
     return ACLLITE_OK;
 }
 
+void Tracking::SendTrackingStateFeedback(std::shared_ptr<DetectDataMsg> detectDataMsg)
+{
+    if (dataInputThreadId_ < 0)
+    {
+        // No data input thread to send feedback to
+        return;
+    }
+
+    std::shared_ptr<DetectDataMsg> feedbackMsg = std::make_shared<DetectDataMsg>();
+    feedbackMsg->trackingActive = detectDataMsg->trackingActive;
+    feedbackMsg->trackingConfidence = detectDataMsg->trackingConfidence;
+    feedbackMsg->needRedetection = detectDataMsg->needRedetection;
+    feedbackMsg->channelId = detectDataMsg->channelId;
+    
+    AclLiteError ret = SendMessage(dataInputThreadId_, MSG_TRACK_STATE_CHANGE, feedbackMsg);
+    if (ret != ACLLITE_OK)
+    {
+        ACLLITE_LOG_WARNING("[Tracking Ch%d] Failed to send track state change to DataInput, error %d",
+                            detectDataMsg->channelId, ret);
+    }
+}
+
 AclLiteError Tracking::Process(int msgId, std::shared_ptr<void> data)
 {
     switch (msgId)
@@ -155,6 +177,10 @@ AclLiteError Tracking::Process(int msgId, std::shared_ptr<void> data)
         {
             dataOutputThreadId_ = detectDataMsg->dataOutputThreadId;
         }
+        if (dataInputThreadId_ < 0)
+        {
+            dataInputThreadId_ = detectDataMsg->dataInputThreadId;
+        }
 
         // 单目标跟踪：首次检测初始化，后续调用 track 更新
         if (!detectDataMsg->frame.empty())
@@ -163,14 +189,10 @@ AclLiteError Tracking::Process(int msgId, std::shared_ptr<void> data)
 
             if (!tracking_initialized_)
             {
-                // 选择最高分目标作为跟踪目标
+                // 选择最高分目标作为跟踪目标(后处理已把最佳目标放在首位)
                 if (!detectDataMsg->detections.empty())
                 {
-                    const auto best = *std::max_element(
-                        detectDataMsg->detections.begin(),
-                        detectDataMsg->detections.end(),
-                        [](const DetectionOBB &a, const DetectionOBB &b)
-                        { return a.score < b.score; });
+                    const DetectionOBB &best = detectDataMsg->detections[0];
 
                     DrOBB initBox;
                     initBox.box.x0 = best.x0;
@@ -178,24 +200,46 @@ AclLiteError Tracking::Process(int msgId, std::shared_ptr<void> data)
                     initBox.box.x1 = best.x1;
                     initBox.box.y1 = best.y1;
                     initBox.class_id = best.class_id;
+                    // preserve detection init score in DrOBB for follow-up tracking
+                    initBox.score = best.score;
+                    initBox.initScore = best.score;
 
                     if (this->init(img, initBox) == 0)
                     {
                         tracking_initialized_ = true;
+                        track_loss_count_ = 0;
+                        current_tracking_confidence_ = best.score;
+                        
                         // Store tracking result in new structure
                         detectDataMsg->trackingResult.bbox = best;
                         detectDataMsg->trackingResult.isTracked = true;
                         detectDataMsg->trackingResult.initScore = best.score;
+                        detectDataMsg->trackingResult.curScore = best.score;
+                        
+                        // 设置跟踪状态
+                        detectDataMsg->trackingActive = true;
+                        detectDataMsg->trackingConfidence = best.score;
+                        detectDataMsg->needRedetection = false;
+                        
                         // Keep old fields for backward compatibility
                         detectDataMsg->hasTracking = true;
                         detectDataMsg->trackInitScore = best.score;
+                        detectDataMsg->trackScore = best.score;
+                        
+                        ACLLITE_LOG_INFO("[Tracking Ch%d] Initialized with score=%.3f",
+                                         detectDataMsg->channelId, best.score);
+                        // 通知DataInput跟踪已激活，DataInput可以进入TRACK_ONLY模式
+                        SendTrackingStateFeedback(detectDataMsg);
                     }
                 }
             }
             else
             {
+                // 已初始化,执行跟踪更新
                 const DrOBB &tracked = this->track(img);
-                // Store tracking result in new structure (NOT appended to detections)
+                current_tracking_confidence_ = tracked.score;
+                
+                // Store tracking result in new structure
                 detectDataMsg->trackingResult.bbox.x0 = tracked.box.x0;
                 detectDataMsg->trackingResult.bbox.y0 = tracked.box.y0;
                 detectDataMsg->trackingResult.bbox.x1 = tracked.box.x1;
@@ -204,17 +248,128 @@ AclLiteError Tracking::Process(int msgId, std::shared_ptr<void> data)
                 detectDataMsg->trackingResult.bbox.class_id = tracked.class_id;
                 detectDataMsg->trackingResult.isTracked = true;
                 detectDataMsg->trackingResult.curScore = tracked.score;
+                // preserve initial detection confidence across frames
+                detectDataMsg->trackingResult.initScore = tracked.initScore;
+                
+                // 更新跟踪状态
+                detectDataMsg->trackingActive = true;
+                detectDataMsg->trackingConfidence = tracked.score;
+                detectDataMsg->needRedetection = false;
+                track_loss_count_ = 0;
+                
                 // Keep old fields for backward compatibility
                 detectDataMsg->hasTracking = true;
                 detectDataMsg->trackScore = tracked.score;
+                // keep backward compat init score
+                detectDataMsg->trackInitScore = tracked.initScore;
             }
         }
 
-        // Forward message to DataOutputThread via helper
+        // Forward message to DataOutputThread
         MsgSend(detectDataMsg);
-
         return ACLLITE_OK;
     }
+    
+    case MSG_TRACK_ONLY: // tracking only (no detection, from DataInput)
+    {
+        std::shared_ptr<DetectDataMsg> detectDataMsg =
+            std::static_pointer_cast<DetectDataMsg>(data);
+        
+        // Ensure thread ids cached
+        if (dataOutputThreadId_ < 0)
+        {
+            dataOutputThreadId_ = detectDataMsg->dataOutputThreadId;
+        }
+        if (dataInputThreadId_ < 0)
+        {
+            dataInputThreadId_ = detectDataMsg->dataInputThreadId;
+        }
+        
+        if (!tracking_initialized_)
+        {
+            // 跟踪未初始化,需要检测
+            ACLLITE_LOG_WARNING("[Tracking Ch%d] Not initialized, requesting detection",
+                                detectDataMsg->channelId);
+            detectDataMsg->trackingActive = false;
+            detectDataMsg->needRedetection = true;
+            detectDataMsg->trackingConfidence = 0.0f;
+            
+            // 反馈状态给DataInput
+            SendTrackingStateFeedback(detectDataMsg);
+            
+            // 仍然发送到输出(显示原图)
+            MsgSend(detectDataMsg);
+            return ACLLITE_OK;
+        }
+        
+        // 执行跟踪
+        if (!detectDataMsg->frame.empty())
+        {
+            cv::Mat &img = detectDataMsg->frame[0];
+            const DrOBB &tracked = this->track(img);
+            
+            // 更新置信度
+            current_tracking_confidence_ = tracked.score;
+            
+            // Store tracking result
+            detectDataMsg->trackingResult.bbox.x0 = tracked.box.x0;
+            detectDataMsg->trackingResult.bbox.y0 = tracked.box.y0;
+            detectDataMsg->trackingResult.bbox.x1 = tracked.box.x1;
+            detectDataMsg->trackingResult.bbox.y1 = tracked.box.y1;
+            detectDataMsg->trackingResult.bbox.score = tracked.score;
+            detectDataMsg->trackingResult.bbox.class_id = tracked.class_id;
+            detectDataMsg->trackingResult.isTracked = true;
+            detectDataMsg->trackingResult.curScore = tracked.score;
+            // preserve initial detection confidence across frames
+            detectDataMsg->trackingResult.initScore = tracked.initScore;
+            
+            // Keep old fields
+            detectDataMsg->hasTracking = true;
+            detectDataMsg->trackScore = tracked.score;
+            // keep backward compat init score
+            detectDataMsg->trackInitScore = tracked.initScore;
+            
+            // ============ 判断是否需要重新检测 ============
+            bool needRedetection = false;
+            
+            if (tracked.score < confidence_redetect_threshold_)
+            {
+                track_loss_count_++;
+                ACLLITE_LOG_WARNING("[Tracking Ch%d Frame%d] Low confidence: %.3f (threshold=%.3f), loss_count=%d",
+                                    detectDataMsg->channelId, detectDataMsg->msgNum,
+                                    tracked.score, confidence_redetect_threshold_, track_loss_count_);
+            }
+            else
+            {
+                track_loss_count_ = 0;
+            }
+            
+            if (track_loss_count_ >= max_track_loss_frames_)
+            {
+                needRedetection = true;
+                ACLLITE_LOG_INFO("[Tracking Ch%d] Lost tracking after %d frames, requesting redetection",
+                                 detectDataMsg->channelId, track_loss_count_);
+                tracking_initialized_ = false;  // 重置跟踪状态
+                track_loss_count_ = 0;
+            }
+            
+            // 更新消息状态
+            detectDataMsg->trackingActive = !needRedetection && (tracked.score >= confidence_active_threshold_);
+            detectDataMsg->trackingConfidence = tracked.score;
+            detectDataMsg->needRedetection = needRedetection;
+            
+            // 如果需要重新检测,反馈给DataInput
+            if (needRedetection)
+            {
+                SendTrackingStateFeedback(detectDataMsg);
+            }
+        }
+        
+        // Forward to output
+        MsgSend(detectDataMsg);
+        return ACLLITE_OK;
+    }
+    
     default:
         ACLLITE_LOG_INFO("Tracking thread ignore msg %d", msgId);
         return ACLLITE_OK;
@@ -319,6 +474,21 @@ void Tracking::setMaxScoreDecay(float decay)
     this->max_score_decay = decay;
 }
 
+void Tracking::setConfidenceActiveThreshold(float threshold)
+{
+    this->confidence_active_threshold_ = threshold;
+}
+
+void Tracking::setConfidenceRedetectThreshold(float threshold)
+{
+    this->confidence_redetect_threshold_ = threshold;
+}
+
+void Tracking::setMaxTrackLossFrames(int maxFrames)
+{
+    this->max_track_loss_frames_ = maxFrames;
+}
+
 void Tracking::resetMaxPredScore() { this->max_pred_score = 0.0f; }
 
 int Tracking::init(const cv::Mat &img, DrOBB bbox)
@@ -358,7 +528,9 @@ int Tracking::init(const cv::Mat &img, DrOBB bbox)
 
     this->state = bbox.box;
     this->object_box.box = bbox.box;
-    this->object_box.score = 1.0f;
+    // set initial tracking confidence from detection score if available
+    this->object_box.score = bbox.score > 0 ? bbox.score : 1.0f;
+    this->object_box.initScore = bbox.initScore > 0 ? bbox.initScore : bbox.score;
     this->object_box.class_id = bbox.class_id;
     this->resetMaxPredScore();
     this->frame_id = 0;

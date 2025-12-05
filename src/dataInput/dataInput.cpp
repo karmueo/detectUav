@@ -62,7 +62,12 @@ DataInputThread::DataInputThread(int32_t       deviceId,
       dataOutputThreadId_(INVALID_INSTANCE_ID),
       rtspDisplayThreadId_(INVALID_INSTANCE_ID),
       framesPerSecond_(framesPerSecond),
-      frameSkip_(frameSkip < 1 ? 1 : frameSkip)  // 至少为1,不跳帧
+      frameSkip_(frameSkip < 1 ? 1 : frameSkip),  // 至少为1,不跳帧
+      trackThreadId_(INVALID_INSTANCE_ID),
+      isTrackingActive_(false),
+      currentTrackingConfidence_(0.0f),
+    isFirstFrame_(true)
+    , lastIsTrackingMode_(false)
 {
 }
 
@@ -161,6 +166,8 @@ AclLiteError DataInputThread::Init()
         GetAclLiteThreadIdByName(kDataOutputName + to_string(channelId_));
     rtspDisplayThreadId_ =
         GetAclLiteThreadIdByName(kRtspDisplayName + to_string(channelId_));
+    trackThreadId_ =
+        GetAclLiteThreadIdByName(string("track") + to_string(channelId_));
     for (int i = 0; i < postThreadNum_; i++)
     {
         postThreadId_[i] = GetAclLiteThreadIdByName(
@@ -210,6 +217,42 @@ AclLiteError DataInputThread::Process(int msgId, shared_ptr<void> msgData)
     case MSG_READ_FRAME:
         MsgRead(detectDataMsg);
         MsgSend(detectDataMsg);
+        break;
+    case MSG_TRACK_STATE_CHANGE:
+        {
+            // 跟踪线程反馈状态变化
+            shared_ptr<DetectDataMsg> trackStateMsg = static_pointer_cast<DetectDataMsg>(msgData);
+            if (trackStateMsg)
+            {
+                isTrackingActive_ = trackStateMsg->trackingActive;
+                currentTrackingConfidence_ = trackStateMsg->trackingConfidence;
+                    // 当tracking激活时，允许在后续帧跳过推理（进入TRACK_ONLY模式）
+                    if (trackStateMsg->trackingActive) {
+                        isFirstFrame_ = false;
+                        ACLLITE_LOG_INFO("[DataInput Ch%d] Tracking activated (conf=%.3f), ready to skip inference", channelId_, currentTrackingConfidence_);
+                    }
+                
+                if (trackStateMsg->needRedetection)
+                {
+                    ACLLITE_LOG_INFO("[DataInput Ch%d] Tracking lost (conf=%.3f), switching to detection mode",
+                                     channelId_, currentTrackingConfidence_);
+                    isTrackingActive_ = false;
+                        // 重新检测时把标记复位，确保下一帧走检测逻辑
+                        isFirstFrame_ = true;
+                    
+                    // 清空检测预处理、推理、后处理的队列
+                    AclLiteApp &app = GetAclLiteAppInstance();
+                    app.ClearThreadQueue(preThreadId_);
+                    app.ClearThreadQueue(inferThreadId_);
+                    for (int i = 0; i < postThreadNum_; i++)
+                    {
+                        app.ClearThreadQueue(postThreadId_[i]);
+                    }
+                    ACLLITE_LOG_INFO("[DataInput Ch%d] Cleared detection queues (preprocess, inference, postprocess)",
+                                     channelId_);
+                }
+            }
+        }
         break;
     // FIXME: 暂时注释掉以下代码，避免与DataOutputThread中发送的MSG_INFER_DONE冲突
     // case MSG_READ_FRAME:
@@ -433,6 +476,13 @@ AclLiteError DataInputThread::MsgRead(shared_ptr<DetectDataMsg> &detectDataMsg)
     detectDataMsg->deviceId = deviceId_;
     detectDataMsg->channelId = channelId_;
     detectDataMsg->msgNum = msgNum_;
+    
+    // 设置跟踪状态信息
+    detectDataMsg->trackingActive = isTrackingActive_;
+    detectDataMsg->trackingConfidence = currentTrackingConfidence_;
+    detectDataMsg->skipInference = isTrackingActive_ && !isFirstFrame_;
+    detectDataMsg->needRedetection = false;
+    
     msgNum_++;
     GetOneFrame(detectDataMsg);
     if (detectDataMsg->isLastFrame)
@@ -459,26 +509,76 @@ AclLiteError DataInputThread::MsgSend(shared_ptr<DetectDataMsg> &detectDataMsg)
     
     if (detectDataMsg->isLastFrame == false)
     {
-        while (1)
+        // ============ 智能路由逻辑 ============
+        // 条件A: 跟踪活跃且不是首帧 -> 直接发送给跟踪线程(跳过推理)
+        bool isTrackingMode = detectDataMsg->skipInference &&
+                              trackThreadId_ != INVALID_INSTANCE_ID;
+        if (isTrackingMode)
         {
-            ret = SendMessage(detectDataMsg->detectPreThreadId,
-                              MSG_PREPROC_DETECTDATA,
-                              detectDataMsg);
-            if (ret == ACLLITE_ERROR_ENQUEUE)
+            // 跳过检测推理,直接进行跟踪
+            while (1)
             {
-                usleep(kSleepTime);
-                continue;
+                ret = SendMessage(trackThreadId_,
+                                  MSG_TRACK_ONLY,
+                                  detectDataMsg);
+                if (ret == ACLLITE_ERROR_ENQUEUE)
+                {
+                    usleep(kSleepTime);
+                    continue;
+                }
+                else if (ret == ACLLITE_OK)
+                {
+                    if (isFirstFrame_)
+                    {
+                        isFirstFrame_ = false;
+                    }
+                    break;
+                }
+                else
+                {
+                    ACLLITE_LOG_ERROR("Send tracking message failed, error %d", ret);
+                    return ret;
+                }
             }
-            else if (ret == ACLLITE_OK)
+            
+            if (!lastIsTrackingMode_)
             {
-                break;
+                ACLLITE_LOG_INFO("[DataInput Ch%d Frame%d] TRACKING_ONLY mode (skip inference, conf=%.3f)",
+                                 channelId_, detectDataMsg->msgNum, currentTrackingConfidence_);
             }
-            else
+            lastIsTrackingMode_ = true;
+        }
+        else
+        {
+            // 条件B: 首帧或跟踪失败 -> 执行完整检浊推理流程
+            while (1)
             {
-                ACLLITE_LOG_ERROR("Send read frame message failed, error %d",
-                                  ret);
-                return ret;
+                ret = SendMessage(detectDataMsg->detectPreThreadId,
+                                  MSG_PREPROC_DETECTDATA,
+                                  detectDataMsg);
+                if (ret == ACLLITE_ERROR_ENQUEUE)
+                {
+                    usleep(kSleepTime);
+                    continue;
+                }
+                else if (ret == ACLLITE_OK)
+                {
+                    break;
+                }
+                else
+                {
+                    ACLLITE_LOG_ERROR("Send read frame message failed, error %d",
+                                      ret);
+                    return ret;
+                }
             }
+            
+            if (lastIsTrackingMode_)
+            {
+                ACLLITE_LOG_INFO("[DataInput Ch%d Frame%d] DETECTION mode (full inference pipeline)",
+                                 channelId_, detectDataMsg->msgNum);
+            }
+            lastIsTrackingMode_ = false;
         }
 
         ret = SendMessage(selfThreadId_, MSG_READ_FRAME, nullptr);

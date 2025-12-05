@@ -314,3 +314,14 @@ void AclLiteApp::PrintQueueStatus()
     }
     ACLLITE_LOG_INFO("=========================================");
 }
+
+void AclLiteApp::ClearThreadQueue(int threadId)
+{
+    if ((uint32_t)threadId >= threadList_.size())
+    {
+        ACLLITE_LOG_ERROR("Clear queue failed for thread id %d invalid", threadId);
+        return;
+    }
+    threadList_[threadId]->msgQueue_.Clear();
+}
+

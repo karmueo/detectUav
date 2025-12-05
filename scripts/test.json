@@ -12,12 +12,18 @@
                     "frame_skip":1,
                     "io_info":[
                         {
-                            "input_path":"rtsp://192.168.1.80:8554/uav.264",
+                            "input_path":"rtsp://192.168.1.80:8554/uav2.264",
                             "input_type":"rtsp",
                             "output_path":"rtsp://192.168.1.80/live/uav",
                             "output_type":"rtsp",
                             "channel_id":0,
-                            "track_model_path":"./model/mixformerv2_online_small_bs1.om"
+                            "track_model_path":"./model/mixformerv2_online_small_bs1.om",
+                            "tracking_config": {
+                                "confidence_active_threshold": 0.60,
+                                "confidence_redetect_threshold": 0.60,
+                                "max_track_loss_frames": 1,
+                                "score_decay_factor": 0.98
+                            }
                         }
                     ]
                 }

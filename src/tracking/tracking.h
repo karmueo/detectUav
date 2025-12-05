@@ -26,6 +26,7 @@ struct DrOBB
     DrBBox box;      ///< 边界框
     float  score;    ///< 置信度分数
     int    class_id; ///< 类别 ID
+    float  initScore; ///< 初始化检测时的置信度
 };
 
 class Tracking : public AclLiteThread
@@ -118,6 +119,24 @@ class Tracking : public AclLiteThread
      * @param decay 输入：衰减值
      */
     void setMaxScoreDecay(float decay);
+    
+    /**
+     * @brief 设置保持跟踪的最低置信度阈值
+     * @param threshold 输入：置信度阈值
+     */
+    void setConfidenceActiveThreshold(float threshold);
+    
+    /**
+     * @brief 设置触发重新检测的置信度阈值
+     * @param threshold 输入：置信度阈值
+     */
+    void setConfidenceRedetectThreshold(float threshold);
+    
+    /**
+     * @brief 设置最大连续跟踪丢失帧数
+     * @param maxFrames 输入：最大帧数
+     */
+    void setMaxTrackLossFrames(int maxFrames);
 
     /**
      * @brief 设置模板输入数据
@@ -156,6 +175,13 @@ class Tracking : public AclLiteThread
      * @return 预测分数数据向量（大小为1）
      */
     std::vector<float> getOutputPredScores() const;
+    
+    /**
+     * @brief 发送跟踪状态反馈给DataInput线程
+     * @param detectDataMsg 输入：检测数据消息
+     */
+    void SendTrackingStateFeedback(std::shared_ptr<DetectDataMsg> detectDataMsg);
+    
     private:
     /**
      * @brief 重置最大预测分数
@@ -258,7 +284,15 @@ class Tracking : public AclLiteThread
     /// 线程/上下文
     aclrtRunMode runMode_;                      ///< 运行模式
     int          dataOutputThreadId_ = -1;      ///< 数据输出线程 ID
+    int          dataInputThreadId_ = -1;       ///< 数据输入线程 ID (用于状态反馈)
     bool         tracking_initialized_ = false; ///< 跟踪是否已初始化
+    
+    /// ============ 跟踪状态管理 ============
+    float        confidence_active_threshold_ = 0.70f;    ///< 保持跟踪的最低置信度
+    float        confidence_redetect_threshold_ = 0.40f;  ///< 触发重新检测的置信度
+    int          max_track_loss_frames_ = 10;             ///< 连续丢失帧数阈值
+    int          track_loss_count_ = 0;                   ///< 当前连续丢失帧数
+    float        current_tracking_confidence_ = 0.0f;     ///< 当前跟踪置信度
 };
 
 #endif // TRACKING_H

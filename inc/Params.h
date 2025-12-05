@@ -65,6 +65,8 @@ const int MSG_RTSP_DISPLAY = 8;
 const int MSG_APP_EXIT = 9;
 const int MSG_INFER_DONE = 10;
 const int MSG_TRACK_DATA = 11; // detection -> tracker
+const int MSG_TRACK_ONLY = 12; // dataInput -> tracker (tracking only, no detection)
+const int MSG_TRACK_STATE_CHANGE = 13; // tracker -> dataInput (tracking state feedback)
 
 const std::string kDataInputName = "dataInput";
 const std::string kPreName = "pre";
@@ -103,6 +105,12 @@ struct DetectDataMsg
     bool   hasTracking = false;       // whether tracking is active
     float  trackInitScore = 0.0f;     // detection confidence at init
     float  trackScore = 0.0f;         // current tracking confidence
+    
+    // ============ 新增: 智能推理控制字段 ============
+    bool   trackingActive = false;         // 当前是否处于主动跟踪状态
+    bool   skipInference = false;          // 是否跳过检测推理
+    float  trackingConfidence = 0.0f;      // 当前跟踪置信度
+    bool   needRedetection = false;        // 是否需要重新检测(跟踪失败时置为true)
 };
 
 #endif

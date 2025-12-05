@@ -69,11 +69,12 @@ const int MSG_TRACK_ONLY = 12; // dataInput -> tracker (tracking only, no detect
 const int MSG_TRACK_STATE_CHANGE = 13; // tracker -> dataInput (tracking state feedback)
 
 const std::string kDataInputName = "dataInput";
-const std::string kPreName = "pre";
-const std::string kInferName = "infer";
+const std::string kPreName = "detectPre";
+const std::string kInferName = "detectInfer";
 const std::string kPostName = "detectPost";
 const std::string kDataOutputName = "dataOutput";
 const std::string kRtspDisplayName = "rtspDisplay";
+const std::string kTrackName = "track";
 } // namespace
 
 struct DetectDataMsg

@@ -10,6 +10,7 @@
 #include "AclLiteApp.h"
 #include "AclLiteThreadMgr.h"
 #include "acl/acl.h"
+#include <cctype>
 
 using namespace std;
 namespace
@@ -302,12 +303,30 @@ void AclLiteApp::PrintQueueStatus()
     {
         const std::string &name = threadList_[i]->GetThreadName();
         uint32_t queueSize = threadList_[i]->GetQueueSize();
-        if (queueSize > 0 || name.find("DataInput") != std::string::npos || 
-            name.find("Preprocess") != std::string::npos ||
-            name.find("Inference") != std::string::npos ||
-            name.find("Postprocess") != std::string::npos ||
-            name.find("Output") != std::string::npos ||
-            name.find("Rtsp") != std::string::npos)
+        // case-insensitive name matching; ensure inference and rtsp threads are
+        // printed even when their queue size is 0
+        auto ToLower = [](const std::string &s) {
+            std::string out;
+            out.reserve(s.size());
+            for (unsigned char c : s) {
+                out.push_back(std::tolower(c));
+            }
+            return out;
+        };
+        std::string nameLower = ToLower(name);
+        if (queueSize > 0 ||
+            nameLower.find("datainput") != std::string::npos ||
+            nameLower.find("detectpre") != std::string::npos ||
+            nameLower.find("preprocess") != std::string::npos ||
+            nameLower.find("infer") != std::string::npos ||
+            nameLower.find("detectinfer") != std::string::npos ||
+            nameLower.find("postprocess") != std::string::npos ||
+            nameLower.find("detectpost") != std::string::npos ||
+            // show track queue lengths when tracking is enabled
+            nameLower.find("track") != std::string::npos ||
+            nameLower.find("dataoutput") != std::string::npos ||
+            nameLower.find("output") != std::string::npos ||
+            nameLower.find("rtsp") != std::string::npos)
         {
             ACLLITE_LOG_INFO("  [%s] Queue: %u", name.c_str(), queueSize);
         }

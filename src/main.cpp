@@ -100,9 +100,9 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
             {
                 // Get modelwidth, modelheight, modelpath, and thread name for
                 // each model thread
-                string inferName = root["device_config"][i]["model_config"][j]
-                                       ["infer_thread_name"]
-                                           .asString();
+                // Generate infer thread name using Params.h constant and indexes
+                // to ensure uniqueness across devices and models
+                string inferName = kInferName + to_string(deviceId) + "_" + to_string(j);
                 string modelPath =
                     root["device_config"][i]["model_config"][j]["model_path"]
                         .asString();
@@ -166,6 +166,29 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                 inferParam.context = context;
                 inferParam.runMode = runMode;
                 threadTbl.push_back(inferParam);
+                // Read track configuration from model_config -> track_config (same level as io_info)
+                bool enableTrackingModel = true; // default behavior remains true
+                string trackModelPathModel = "";
+                Json::Value trackingConfigModel;
+                bool hasTrackConfigModel = false;
+                if (root["device_config"][i]["model_config"][j]["track_config"].type() != Json::nullValue)
+                {
+                    Json::Value trackConf = root["device_config"][i]["model_config"][j]["track_config"];
+                    hasTrackConfigModel = true;
+                    if (trackConf["enable_tracking"].type() != Json::nullValue)
+                    {
+                        enableTrackingModel = trackConf["enable_tracking"].asBool();
+                    }
+                    if (trackConf["track_model_path"].type() != Json::nullValue)
+                    {
+                        trackModelPathModel = trackConf["track_model_path"].asString();
+                    }
+                    if (trackConf["tracking_config"].type() != Json::nullValue)
+                    {
+                        trackingConfigModel = trackConf["tracking_config"];
+                    }
+                }
+
                 for (int k = 0;
                      k < root["device_config"][i]["model_config"][j]["io_info"]
                              .size();
@@ -237,57 +260,79 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                     }
 
                     // 创建单目标跟踪线程（Tracking），每个通道一个实例
-                    // 读取跟踪模型路径
-                    string trackModelPath = "";
-                    if (root["device_config"][i]["model_config"][j]["io_info"][k]["track_model_path"].type() != Json::nullValue)
-                    {
-                        trackModelPath = root["device_config"][i]["model_config"][j]["io_info"][k]["track_model_path"].asString();
-                    }
+                    // Use model-level tracking configuration
+                    bool enableTracking = enableTrackingModel;
+                    string trackModelPath = trackModelPathModel;
                     
-                    string trackName = string("track") + to_string(channelId);
-                    Tracking* trackingInst = new Tracking(trackModelPath); // 使用配置文件中的模型路径
-                    
-                    // 读取并设置跟踪配置参数
-                    if (root["device_config"][i]["model_config"][j]["io_info"][k]["tracking_config"].type() != Json::nullValue)
+                    // If model-level config absent, fallback to io_info-level
+                    if (!hasTrackConfigModel)
                     {
-                        Json::Value trackingConfig = root["device_config"][i]["model_config"][j]["io_info"][k]["tracking_config"];
-                        
-                        if (trackingConfig["confidence_active_threshold"].type() != Json::nullValue)
+                        if (root["device_config"][i]["model_config"][j]["io_info"][k]["enable_tracking"].type() != Json::nullValue)
                         {
-                            float threshold = trackingConfig["confidence_active_threshold"].asFloat();
-                            trackingInst->setConfidenceActiveThreshold(threshold);
-                            ACLLITE_LOG_INFO("Set tracking confidence_active_threshold=%.2f for channel %d", threshold, channelId);
+                            enableTracking = root["device_config"][i]["model_config"][j]["io_info"][k]["enable_tracking"].asBool();
                         }
-                        
-                        if (trackingConfig["confidence_redetect_threshold"].type() != Json::nullValue)
+                        if (enableTracking && root["device_config"][i]["model_config"][j]["io_info"][k]["track_model_path"].type() != Json::nullValue)
                         {
-                            float threshold = trackingConfig["confidence_redetect_threshold"].asFloat();
-                            trackingInst->setConfidenceRedetectThreshold(threshold);
-                            ACLLITE_LOG_INFO("Set tracking confidence_redetect_threshold=%.2f for channel %d", threshold, channelId);
-                        }
-                        
-                        if (trackingConfig["max_track_loss_frames"].type() != Json::nullValue)
-                        {
-                            int maxLossFrames = trackingConfig["max_track_loss_frames"].asInt();
-                            trackingInst->setMaxTrackLossFrames(maxLossFrames);
-                            ACLLITE_LOG_INFO("Set tracking max_track_loss_frames=%d for channel %d", maxLossFrames, channelId);
-                        }
-                        
-                        if (trackingConfig["score_decay_factor"].type() != Json::nullValue)
-                        {
-                            float decay = trackingConfig["score_decay_factor"].asFloat();
-                            trackingInst->setMaxScoreDecay(decay);
-                            ACLLITE_LOG_INFO("Set tracking score_decay_factor=%.2f for channel %d", decay, channelId);
+                            trackModelPath = root["device_config"][i]["model_config"][j]["io_info"][k]["track_model_path"].asString();
                         }
                     }
                     
-                    AclLiteThreadParam trackParam;
-                    trackParam.threadInst = trackingInst;
-                    trackParam.threadInstName.assign(trackName.c_str());
-                    trackParam.context = context;
-                    trackParam.runMode = runMode;
-                    trackParam.queueSize = kMsgQueueSize;
-                    threadTbl.push_back(trackParam);
+                    string trackName = kTrackName + to_string(channelId);
+                    Tracking* trackingInst = nullptr;
+                    if (enableTracking)
+                    {
+                        trackingInst = new Tracking(trackModelPath); // 使用配置文件中的模型路径
+                        
+                        // 读取并设置跟踪配置参数
+                        Json::Value trackingConfig;
+                        if (trackingConfigModel.type() != Json::nullValue)
+                        {
+                            trackingConfig = trackingConfigModel;
+                        }
+                        else if (root["device_config"][i]["model_config"][j]["io_info"][k]["tracking_config"].type() != Json::nullValue)
+                        {
+                            trackingConfig = root["device_config"][i]["model_config"][j]["io_info"][k]["tracking_config"];
+                        }
+                        if (trackingConfig.type() != Json::nullValue)
+                        {
+                            
+                            if (trackingConfig["confidence_active_threshold"].type() != Json::nullValue)
+                            {
+                                float threshold = trackingConfig["confidence_active_threshold"].asFloat();
+                                trackingInst->setConfidenceActiveThreshold(threshold);
+                                ACLLITE_LOG_INFO("Set tracking confidence_active_threshold=%.2f for channel %d", threshold, channelId);
+                            }
+                            
+                            if (trackingConfig["confidence_redetect_threshold"].type() != Json::nullValue)
+                            {
+                                float threshold = trackingConfig["confidence_redetect_threshold"].asFloat();
+                                trackingInst->setConfidenceRedetectThreshold(threshold);
+                                ACLLITE_LOG_INFO("Set tracking confidence_redetect_threshold=%.2f for channel %d", threshold, channelId);
+                            }
+                            
+                            if (trackingConfig["max_track_loss_frames"].type() != Json::nullValue)
+                            {
+                                int maxLossFrames = trackingConfig["max_track_loss_frames"].asInt();
+                                trackingInst->setMaxTrackLossFrames(maxLossFrames);
+                                ACLLITE_LOG_INFO("Set tracking max_track_loss_frames=%d for channel %d", maxLossFrames, channelId);
+                            }
+                            
+                            if (trackingConfig["score_decay_factor"].type() != Json::nullValue)
+                            {
+                                float decay = trackingConfig["score_decay_factor"].asFloat();
+                                trackingInst->setMaxScoreDecay(decay);
+                                ACLLITE_LOG_INFO("Set tracking score_decay_factor=%.2f for channel %d", decay, channelId);
+                            }
+                        }
+                        
+                        AclLiteThreadParam trackParam;
+                        trackParam.threadInst = trackingInst;
+                        trackParam.threadInstName.assign(trackName.c_str());
+                        trackParam.context = context;
+                        trackParam.runMode = runMode;
+                        trackParam.queueSize = kMsgQueueSize;
+                        threadTbl.push_back(trackParam);
+                    }
 
                     AclLiteThreadParam dataOutputParam;
                     dataOutputParam.threadInst = new DataOutputThread(

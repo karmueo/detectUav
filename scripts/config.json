@@ -4,12 +4,21 @@
             "device_id":0,
             "model_config":[
                 {
-                    "infer_thread_name":"infer_thread_0",
                     "model_path":"./model/yolov11n_110_rgb_640_raw_v0_bs1.om",
                     "model_width":640,
                     "model_heigth":640,
                     "model_batch": 1,
                     "frame_skip":1,
+                    "track_config":{
+                        "enable_tracking": false,
+                        "track_model_path":"./model/mixformerv2_online_small_bs1.om",
+                        "tracking_config":{
+                            "confidence_active_threshold": 0.60,
+                            "confidence_redetect_threshold": 0.60,
+                            "max_track_loss_frames": 1,
+                            "score_decay_factor": 0.98
+                        }
+                    },
                     "io_info":[
                         {
                             "input_path":"rtsp://admin:scl000144@192.168.2.64:554/Streaming/Channels/101",

@@ -167,7 +167,7 @@ AclLiteError DataInputThread::Init()
     rtspDisplayThreadId_ =
         GetAclLiteThreadIdByName(kRtspDisplayName + to_string(channelId_));
     trackThreadId_ =
-        GetAclLiteThreadIdByName(string("track") + to_string(channelId_));
+        GetAclLiteThreadIdByName(kTrackName + to_string(channelId_));
     for (int i = 0; i < postThreadNum_; i++)
     {
         postThreadId_[i] = GetAclLiteThreadIdByName(
@@ -471,7 +471,7 @@ AclLiteError DataInputThread::MsgRead(shared_ptr<DetectDataMsg> &detectDataMsg)
     detectDataMsg->dataOutputThreadId = dataOutputThreadId_;
     detectDataMsg->rtspDisplayThreadId = rtspDisplayThreadId_;
     // Set track thread instance id (if configured, otherwise INVALID_INSTANCE_ID)
-    detectDataMsg->trackThreadId = GetAclLiteThreadIdByName(string("track") + to_string(channelId_));
+    detectDataMsg->trackThreadId = GetAclLiteThreadIdByName(kTrackName + to_string(channelId_));
     detectDataMsg->dataInputThreadId = selfThreadId_;
     detectDataMsg->deviceId = deviceId_;
     detectDataMsg->channelId = channelId_;

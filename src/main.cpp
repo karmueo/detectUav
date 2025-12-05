@@ -46,7 +46,7 @@ int                  kPostNum = 1;
 int                  kFramesPerSecond = 1000;
 uint32_t             kMsgQueueSize = 3;
 uint32_t             argNum = 2;
-int                  kFrameSkip = 2;  // 默认跳帧参数:每2帧处理1帧
+int                  kFrameDecimation = 0; // 新语义: 跳过 N 帧; 0 = 不跳帧
 } // namespace
 
 int MainThreadProcess(uint32_t msgId, shared_ptr<void> msgData, void *userData)
@@ -136,14 +136,21 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                                                .asInt();
                 }
 
+                // New: frame_decimation means how many frames to skip after
+                // processing one frame (0 => no skip). Use only frame_decimation.
                 if (root["device_config"][i]["model_config"][j]
-                        ["frame_skip"]
+                        ["frame_decimation"]
                             .type() != Json::nullValue)
                 {
-                    kFrameSkip = root["device_config"][i]["model_config"]
-                                     [j]["frame_skip"]
-                                         .asInt();
+                    kFrameDecimation = root["device_config"][i]["model_config"]
+                                             [j]["frame_decimation"]
+                                                 .asInt();
+                    if (kFrameDecimation < 0) {
+                        ACLLITE_LOG_WARNING("frame_decimation is negative, clamping to 0");
+                        kFrameDecimation = 0;
+                    }
                 }
+                // Note: legacy field 'frame_skip' is no longer supported. Use 'frame_decimation'.
 
                 if (modelWidth < 0 || modelHeigth < 0 || kBatch < 1 ||
                     kPostNum < 1 || kFramesPerSecond < 1)
@@ -211,6 +218,95 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                         root["device_config"][i]["model_config"][j]["io_info"]
                             [k]["channel_id"]
                                 .asInt();
+                    
+                    // 解析 RTSP 和 H264 编码配置
+                    VencConfig vencConfig;
+                    vencConfig.maxWidth = modelWidth;
+                    vencConfig.maxHeight = modelHeigth;
+                    
+                    // 解析 rtsp_config
+                    if (root["device_config"][i]["model_config"][j]["io_info"][k]["rtsp_config"].type() != Json::nullValue)
+                    {
+                        Json::Value rtspCfg = root["device_config"][i]["model_config"][j]["io_info"][k]["rtsp_config"];
+                        if (rtspCfg["output_width"].type() != Json::nullValue)
+                        {
+                            vencConfig.outputWidth = rtspCfg["output_width"].asUInt();
+                        }
+                        if (rtspCfg["output_height"].type() != Json::nullValue)
+                        {
+                            vencConfig.outputHeight = rtspCfg["output_height"].asUInt();
+                        }
+                        if (rtspCfg["output_fps"].type() != Json::nullValue)
+                        {
+                            vencConfig.outputFps = rtspCfg["output_fps"].asUInt();
+                            if (vencConfig.outputFps < 1 || vencConfig.outputFps > 60)
+                            {
+                                ACLLITE_LOG_WARNING("Output FPS %u out of range [1,60], using default 25", vencConfig.outputFps);
+                                vencConfig.outputFps = 25;
+                            }
+                        }
+                        if (rtspCfg["transport"].type() != Json::nullValue)
+                        {
+                            vencConfig.rtspTransport = rtspCfg["transport"].asString();
+                        }
+                        if (rtspCfg["buffer_size"].type() != Json::nullValue)
+                        {
+                            vencConfig.rtspBufferSize = rtspCfg["buffer_size"].asUInt();
+                        }
+                        if (rtspCfg["max_delay"].type() != Json::nullValue)
+                        {
+                            vencConfig.rtspMaxDelay = rtspCfg["max_delay"].asUInt();
+                        }
+                    }
+                    
+                    // 解析 h264_config
+                    if (root["device_config"][i]["model_config"][j]["io_info"][k]["h264_config"].type() != Json::nullValue)
+                    {
+                        Json::Value h264Cfg = root["device_config"][i]["model_config"][j]["io_info"][k]["h264_config"];
+                        if (h264Cfg["gop_size"].type() != Json::nullValue)
+                        {
+                            vencConfig.gopSize = h264Cfg["gop_size"].asUInt();
+                            if (vencConfig.gopSize < 1 || vencConfig.gopSize > 300)
+                            {
+                                ACLLITE_LOG_WARNING("GOP size %u out of range [1,300], using default 16", vencConfig.gopSize);
+                                vencConfig.gopSize = 16;
+                            }
+                        }
+                        if (h264Cfg["rc_mode"].type() != Json::nullValue)
+                        {
+                            vencConfig.rcMode = h264Cfg["rc_mode"].asUInt();
+                            if (vencConfig.rcMode > 2)
+                            {
+                                ACLLITE_LOG_WARNING("RC mode %u invalid (0=CBR,1=VBR,2=AVBR), using default 2", vencConfig.rcMode);
+                                vencConfig.rcMode = 2;
+                            }
+                        }
+                        if (h264Cfg["max_bitrate"].type() != Json::nullValue)
+                        {
+                            vencConfig.maxBitrate = h264Cfg["max_bitrate"].asUInt();
+                            if (vencConfig.maxBitrate < 500 || vencConfig.maxBitrate > 50000)
+                            {
+                                ACLLITE_LOG_WARNING("Bitrate %u kbps out of range [500,50000], using default 10000", vencConfig.maxBitrate);
+                                vencConfig.maxBitrate = 10000;
+                            }
+                        }
+                        if (h264Cfg["profile"].type() != Json::nullValue)
+                        {
+                            std::string profile = h264Cfg["profile"].asString();
+                            if (profile == "baseline")
+                            {
+                                vencConfig.enType = H264_BASELINE_LEVEL;
+                            }
+                            else if (profile == "main")
+                            {
+                                vencConfig.enType = H264_MAIN_LEVEL;
+                            }
+                            else if (profile == "high")
+                            {
+                                vencConfig.enType = H264_HIGH_LEVEL;
+                            }
+                        }
+                    }
                     string dataInputName =
                         kDataInputName + to_string(channelId);
                     string preName = kPreName + to_string(channelId);
@@ -230,7 +326,7 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                                             kPostNum,
                                             kBatch,
                                             kFramesPerSecond,
-                                            kFrameSkip);
+                                            kFrameDecimation);
                     dataInputParam.threadInstName.assign(dataInputName.c_str());
                     dataInputParam.context = context;
                     dataInputParam.runMode = runMode;
@@ -336,7 +432,7 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
 
                     AclLiteThreadParam dataOutputParam;
                     dataOutputParam.threadInst = new DataOutputThread(
-                        runMode, outputType, outputPath, kPostNum);
+                        runMode, outputType, outputPath, kPostNum, vencConfig);
                     dataOutputParam.threadInstName.assign(
                         dataOutputName.c_str());
                     dataOutputParam.context = context;
@@ -347,7 +443,7 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                     {
                         AclLiteThreadParam rtspDisplayThreadParam;
                         rtspDisplayThreadParam.threadInst = new PushRtspThread(
-                            outputPath + to_string(channelId));
+                            outputPath + to_string(channelId), vencConfig);
                         rtspDisplayThreadParam.threadInstName.assign(
                             rtspDisplayName.c_str());
                         rtspDisplayThreadParam.context = context;

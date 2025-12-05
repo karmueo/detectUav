@@ -72,6 +72,19 @@ struct VencConfig
     aclrtRunMode        runMode = ACL_HOST;
     VencDataCallback    dataCallback = nullptr;  // 编码数据回调
     void*               callbackUserData = nullptr; // 回调用户数据
+    
+    // H264 编码参数
+    uint32_t            gopSize = 16;           // GOP大小(关键帧间隔),默认16
+    uint32_t            rcMode = 2;             // 码率控制模式: 0=CBR, 1=VBR, 2=AVBR,默认2(AVBR)
+    uint32_t            maxBitrate = 10000;     // 最大码率(kbps),默认10000 (10Mbps)
+    
+    // RTSP输出参数
+    uint32_t            outputWidth = 1920;     // 输出视频宽度,默认1920
+    uint32_t            outputHeight = 1080;    // 输出视频高度,默认1080
+    uint32_t            outputFps = 25;         // 输出视频帧率,默认25
+    std::string         rtspTransport = "tcp";  // RTSP传输协议("tcp"或"udp"),默认"tcp"
+    uint32_t            rtspBufferSize = 1024000;  // RTSP缓冲区大小(字节),默认1024000 (1MB)
+    uint32_t            rtspMaxDelay = 500000;  // RTSP最大延迟(微秒),默认500000 (0.5s)
 };
 
 struct ImageData

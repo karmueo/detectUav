@@ -62,7 +62,7 @@ DataInputThread::DataInputThread(int32_t       deviceId,
       dataOutputThreadId_(INVALID_INSTANCE_ID),
       rtspDisplayThreadId_(INVALID_INSTANCE_ID),
       framesPerSecond_(framesPerSecond),
-      frameSkip_(frameSkip < 1 ? 1 : frameSkip),  // 至少为1,不跳帧
+    frameSkip_(frameSkip < 0 ? 0 : frameSkip),  // 跳帧参数: 跳过 frameSkip_ 帧; 0 = 不跳帧
       trackThreadId_(INVALID_INSTANCE_ID),
       isTrackingActive_(false),
       currentTrackingConfidence_(0.0f),
@@ -199,8 +199,8 @@ AclLiteError DataInputThread::Init()
     lastDecodeTime_ = 0;
     waitTime_ = oneSecond / framesPerSecond_;
     
-    ACLLITE_LOG_INFO("DataInputThread initialized: frameSkip=%d (process 1 frame per %d frames)", 
-                     frameSkip_, frameSkip_);
+    ACLLITE_LOG_INFO("DataInputThread initialized: frameSkip=%d (skip %d frames, process 1 frame per %d frames)", 
+                     frameSkip_, frameSkip_, frameSkip_ + 1);
 
     return ACLLITE_OK;
 }
@@ -368,8 +368,8 @@ DataInputThread::ReadStream(shared_ptr<DetectDataMsg> &detectDataMsg)
     AclLiteError ret = ACLLITE_OK;
     ImageData    decodedImg;
 
-    // 跳帧逻辑:跳过frameSkip_-1帧
-    for (int i = 0; i < frameSkip_ - 1; i++)
+    // 跳帧逻辑:跳过 frameSkip_ 帧（例如: frameSkip_=0 不跳帧，frameSkip_=1 跳过1帧）
+    for (int i = 0; i < frameSkip_; i++)
     {
         ImageData skipFrame;
         ret = cap_->Read(skipFrame);

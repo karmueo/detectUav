@@ -6,15 +6,16 @@ using namespace cv;
 using namespace std;
 namespace
 {
-uint32_t kResizeWidth = 1920;   // 方案1:降低分辨率以提升性能 (原1280)
-uint32_t kResizeHeight = 1080;  // 方案1:降低分辨率以提升性能 (原720)
 uint32_t kBgrMultiplier = 3;
 } // namespace
 
-PushRtspThread::PushRtspThread(std::string rtspUrl)
+PushRtspThread::PushRtspThread(std::string rtspUrl, VencConfig vencConfig)
 {
     g_rtspUrl = rtspUrl;
-    ACLLITE_LOG_INFO("PushRtspThread URL : %s", g_rtspUrl.c_str());
+    g_vencConfig = vencConfig;
+    ACLLITE_LOG_INFO("PushRtspThread URL: %s, Resolution: %ux%u, FPS: %u, GOP: %u, Bitrate: %u kbps, RC Mode: %u",
+                     g_rtspUrl.c_str(), g_vencConfig.outputWidth, g_vencConfig.outputHeight,
+                     g_vencConfig.outputFps, g_vencConfig.gopSize, g_vencConfig.maxBitrate, g_vencConfig.rcMode);
 }
 
 // FlushEncoder will be called in PicToRtsp destructor
@@ -34,7 +35,7 @@ AclLiteError PushRtspThread::Init()
         context = nullptr; // VideoWriter会自动获取
     }
     
-    AclLiteError ret = g_picToRtsp.AvInit(kResizeWidth, kResizeHeight, g_rtspUrl, context);
+    AclLiteError ret = g_picToRtsp.AvInit(g_vencConfig.outputWidth, g_vencConfig.outputHeight, g_rtspUrl, context, g_vencConfig);
     if (ret != ACLLITE_OK)
     {
         ACLLITE_LOG_ERROR("AvInit rtsp failed");
@@ -96,6 +97,8 @@ PushRtspThread::DisplayMsgProcess(std::shared_ptr<DetectDataMsg> detectDataMsg)
             cv::Mat &frame = detectDataMsg->frame[i];
             g_picToRtsp.BgrDataToRtsp(frame.data,
                                       frame.cols * frame.rows * kBgrMultiplier,
+                                      frame.cols,
+                                      frame.rows,
                                       g_frameSeq++);
         }
         SendMessage(

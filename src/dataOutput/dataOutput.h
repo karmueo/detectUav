@@ -26,6 +26,8 @@
 #include "AclLiteUtils.h"
 #include "Params.h"
 #include "acl/acl.h"
+#include "AclLiteType.h"
+#include "AclLiteImageProc.h"
 #include <iostream>
 #include <mutex>
 #include <queue>
@@ -35,9 +37,10 @@ class DataOutputThread : public AclLiteThread
 {
   public:
     DataOutputThread(aclrtRunMode &runMode,
-                     std::string   outputDataType,
-                     std::string   outputPath,
-                     int           postThreadNum);
+             std::string   outputDataType,
+             std::string   outputPath,
+             int           postThreadNum,
+             VencConfig    vencConfig = VencConfig());
     ~DataOutputThread();
 
     AclLiteError Init();
@@ -68,6 +71,8 @@ class DataOutputThread : public AclLiteThread
     uint32_t                                   frameCnt_;
     int64_t                                    lastDecodeTime_;
     int64_t                                    lastRecordTime_;
+    VencConfig                                 g_vencConfig;
+    AclLiteImageProc                            dvpp_;
 };
 
 #endif

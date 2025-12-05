@@ -10,7 +10,6 @@ using namespace std;
 namespace
 {
 const string   g_avFormat = "rtsp";
-const uint16_t g_frameRate = 25;
 } // namespace
 PicToRtsp::PicToRtsp()
 {
@@ -51,19 +50,21 @@ PicToRtsp::~PicToRtsp()
     }
 }
 
-int PicToRtsp::AvInit(int picWidth, int picHeight, std::string g_outFile, aclrtContext context)
+int PicToRtsp::AvInit(int picWidth, int picHeight, std::string g_outFile, aclrtContext context, VencConfig vencConfig)
 {
     // 设置FFmpeg日志级别
     av_log_set_level(AV_LOG_ERROR);
 
-    ACLLITE_LOG_INFO("AvInit start: URL=%s, size=%dx%d", g_outFile.c_str(), picWidth, picHeight);
+    ACLLITE_LOG_INFO("AvInit start: URL=%s, size=%dx%d, FPS=%u, GOP=%u, Bitrate=%ukbps, RC=%u",
+                     g_outFile.c_str(), picWidth, picHeight, vencConfig.outputFps,
+                     vencConfig.gopSize, vencConfig.maxBitrate, vencConfig.rcMode);
 
-    // 1. 配置硬件编码器
+    // 1. 配置硬件编码器 - 使用传入的配置并覆盖必要字段
+    g_vencConfig = vencConfig;
     g_vencConfig.maxWidth = picWidth;
     g_vencConfig.maxHeight = picHeight;
     g_vencConfig.outFile = "";
     g_vencConfig.format = PIXEL_FORMAT_YUV_SEMIPLANAR_420;
-    g_vencConfig.enType = H264_MAIN_LEVEL;
     g_vencConfig.context = context;
     g_vencConfig.dataCallback = VencDataCallbackStatic;
     g_vencConfig.callbackUserData = this;
@@ -89,17 +90,17 @@ int PicToRtsp::AvInit(int picWidth, int picHeight, std::string g_outFile, aclrtC
         return ACLLITE_ERROR;
     }
 
-    // 4. 设置RTSP传输优化参数
+    // 4. 设置RTSP传输优化参数 - 使用配置值
     AVDictionary *format_opts = NULL;
-    av_dict_set(&format_opts, "rtsp_transport", "tcp", 0);
-    av_dict_set(&format_opts, "buffer_size", "1024000", 0);      // 增大缓冲区
-    av_dict_set(&format_opts, "max_delay", "500000", 0);         // 最大延迟0.5s
-    av_dict_set(&format_opts, "rtsp_flags", "prefer_tcp", 0);
+    av_dict_set(&format_opts, "rtsp_transport", g_vencConfig.rtspTransport.c_str(), 0);
+    av_dict_set(&format_opts, "buffer_size", std::to_string(g_vencConfig.rtspBufferSize).c_str(), 0);
+    av_dict_set(&format_opts, "max_delay", std::to_string(g_vencConfig.rtspMaxDelay).c_str(), 0);
+    av_dict_set(&format_opts, "rtsp_flags", g_vencConfig.rtspTransport == "tcp" ? "prefer_tcp" : "prefer_udp", 0);
     
     // 将参数应用到私有数据
     if (g_fmtCtx->priv_data) {
-        av_opt_set(g_fmtCtx->priv_data, "rtsp_transport", "tcp", 0);
-        av_opt_set(g_fmtCtx->priv_data, "buffer_size", "1024000", 0);
+        av_opt_set(g_fmtCtx->priv_data, "rtsp_transport", g_vencConfig.rtspTransport.c_str(), 0);
+        av_opt_set(g_fmtCtx->priv_data, "buffer_size", std::to_string(g_vencConfig.rtspBufferSize).c_str(), 0);
     }
 
     // 5. 创建H264视频流
@@ -111,10 +112,10 @@ int PicToRtsp::AvInit(int picWidth, int picHeight, std::string g_outFile, aclrtC
         return ACLLITE_ERROR;
     }
 
-    // 6. 设置视频流时间基准 - 使用更高精度的时间基准
+    // 6. 设置视频流时间基准 - 使用更高精度的时间基准和配置的帧率
     g_avStream->time_base = AVRational{1, 90000};  // H.264标准时间基准
-    g_avStream->avg_frame_rate = AVRational{g_frameRate, 1};
-    g_avStream->r_frame_rate = AVRational{g_frameRate, 1};
+    g_avStream->avg_frame_rate = AVRational{(int)g_vencConfig.outputFps, 1};
+    g_avStream->r_frame_rate = AVRational{(int)g_vencConfig.outputFps, 1};
 
     // 7. 配置编解码器参数
     AVCodecParameters *param = g_avStream->codecpar;
@@ -124,7 +125,7 @@ int PicToRtsp::AvInit(int picWidth, int picHeight, std::string g_outFile, aclrtC
     param->width = picWidth;
     param->height = picHeight;
     param->format = AV_PIX_FMT_YUV420P;
-    param->bit_rate = 4000000;  // 4Mbps码率
+    param->bit_rate = g_vencConfig.maxBitrate * 1000;  // kbps转bps
     
     // 8. 输出格式信息
     av_dump_format(g_fmtCtx, 0, g_outFile.c_str(), 1);
@@ -283,8 +284,8 @@ int PicToRtsp::PushH264Data(const H264Packet& packet)
     static Live555Streamer s_streamer;
     static bool s_inited = false;
     if (!s_inited) {
-        // 首次调用时初始化本地 RTSP 服务器(默认 8554/stream)
-        if (!s_streamer.InitStandalone(8554, "stream", g_frameRate)) {
+        // 首次调用时初始化本地 RTSP 服务器(默认 8554/stream)，使用配置的帧率
+        if (!s_streamer.InitStandalone(8554, "stream", g_vencConfig.outputFps)) {
             ACLLITE_LOG_ERROR("Live555 InitStandalone failed");
             return ACLLITE_ERROR;
         }
@@ -478,12 +479,53 @@ int PicToRtsp::ImageDataToRtsp(ImageData& imageData, uint32_t seq)
         return ACLLITE_ERROR;
     }
 
-    // 直接将传入的 ImageData 送入硬件编码器
-    AclLiteError ret = g_videoWriter->Read(imageData);
-    if (ret != ACLLITE_OK)
-    {
-        ACLLITE_LOG_ERROR("Hardware encode YUV(ImageData) failed");
-        return ACLLITE_ERROR;
+    // 如果 ImageData 大小与编码器期望大小不符,尝试做 resize (fallback)
+    if (imageData.width != g_vencConfig.maxWidth || imageData.height != g_vencConfig.maxHeight) {
+        ACLLITE_LOG_INFO("ImageData size (%u x %u) != encoder size (%u x %u), apply fallback sws resize",
+                         imageData.width, imageData.height, g_vencConfig.maxWidth, g_vencConfig.maxHeight);
+        int srcW = imageData.width;
+        int srcH = imageData.height;
+        int dstW = g_vencConfig.maxWidth;
+        int dstH = g_vencConfig.maxHeight;
+        int dstSize = av_image_get_buffer_size(AV_PIX_FMT_NV12, dstW, dstH, 1);
+        uint8_t *dstBuf = (uint8_t *)av_malloc(dstSize);
+        if (dstBuf == nullptr) {
+            ACLLITE_LOG_ERROR("Unable to allocate buffer for YUV resize fallback");
+            return ACLLITE_ERROR;
+        }
+        AVFrame *srcFrame = av_frame_alloc();
+        AVFrame *dstFrame = av_frame_alloc();
+        av_image_fill_arrays(srcFrame->data, srcFrame->linesize, imageData.data.get(), AV_PIX_FMT_NV12, srcW, srcH, 1);
+        av_image_fill_arrays(dstFrame->data, dstFrame->linesize, dstBuf, AV_PIX_FMT_NV12, dstW, dstH, 1);
+        SwsContext *sws = sws_getContext(srcW, srcH, AV_PIX_FMT_NV12, dstW, dstH, AV_PIX_FMT_NV12, SWS_FAST_BILINEAR, NULL, NULL, NULL);
+        if (!sws) {
+            av_free(dstBuf);
+            av_frame_free(&srcFrame);
+            av_frame_free(&dstFrame);
+            ACLLITE_LOG_ERROR("Failed to create sws context for YUV fallback resize");
+            return ACLLITE_ERROR;
+        }
+        sws_scale(sws, srcFrame->data, srcFrame->linesize, 0, srcH, dstFrame->data, dstFrame->linesize);
+        sws_freeContext(sws);
+        av_frame_free(&srcFrame);
+        av_frame_free(&dstFrame);
+        ImageData tmp;
+        tmp.format = PIXEL_FORMAT_YUV_SEMIPLANAR_420;
+        tmp.width = dstW;
+        tmp.height = dstH;
+        tmp.size = dstSize;
+        tmp.data = std::shared_ptr<uint8_t>(dstBuf, [](uint8_t *p) { av_free(p); });
+        AclLiteError ret = g_videoWriter->Read(tmp);
+        if (ret != ACLLITE_OK) {
+            ACLLITE_LOG_ERROR("Hardware encode YUV(ImageData) failed after fallback resize");
+            return ACLLITE_ERROR;
+        }
+    } else {
+        AclLiteError ret = g_videoWriter->Read(imageData);
+        if (ret != ACLLITE_OK) {
+            ACLLITE_LOG_ERROR("Hardware encode YUV(ImageData) failed");
+            return ACLLITE_ERROR;
+        }
     }
 
     auto end = std::chrono::high_resolution_clock::now();
@@ -565,7 +607,7 @@ void PicToRtsp::BgrDataInint()
 }
 
 // FIXME: 速度瓶颈
-int PicToRtsp::BgrDataToRtsp(void *dataBuf, uint32_t size, uint32_t seq)
+int PicToRtsp::BgrDataToRtsp(void *dataBuf, uint32_t size, uint32_t srcW, uint32_t srcH, uint32_t seq)
 {
     static int  pushCount = 0;
     static long totalConvertTime = 0;
@@ -574,7 +616,8 @@ int PicToRtsp::BgrDataToRtsp(void *dataBuf, uint32_t size, uint32_t seq)
 
     auto startTotal = std::chrono::high_resolution_clock::now();
 
-    if (g_rgbSize != size)
+    uint32_t expected_rgb_size = srcW * srcH * 3;
+    if (expected_rgb_size != size)
     {
         ACLLITE_LOG_ERROR(
             "bgr data size error, The "
@@ -587,15 +630,27 @@ int PicToRtsp::BgrDataToRtsp(void *dataBuf, uint32_t size, uint32_t seq)
 
     // 1. BGR转YUV (使用FFmpeg的sws_scale)
     auto start = std::chrono::high_resolution_clock::now();
-    memcpy(g_brgBuf, dataBuf, g_rgbSize);
+    // create src frame referencing dataBuf
+    AVFrame *srcFrame = av_frame_alloc();
+    av_image_fill_arrays(srcFrame->data, srcFrame->linesize, (uint8_t *)dataBuf, AV_PIX_FMT_BGR24, srcW, srcH, 1);
+
+    // ensure g_imgCtx configured for current src->dst sizes
+    SwsContext *localCtx = sws_getContext(srcW, srcH, AV_PIX_FMT_BGR24, g_vencConfig.maxWidth, g_vencConfig.maxHeight, AV_PIX_FMT_NV12, SWS_FAST_BILINEAR, NULL, NULL, NULL);
+    if (!localCtx) {
+        av_frame_free(&srcFrame);
+        ACLLITE_LOG_ERROR("Failed to create sws context for BGR->NV12");
+        return ACLLITE_ERROR;
+    }
     sws_scale(
-        g_imgCtx,
-        g_rgbFrame->data,
-        g_rgbFrame->linesize,
+        localCtx,
+        srcFrame->data,
+        srcFrame->linesize,
         0,
-        g_vencConfig.maxHeight,
+        srcH,
         g_yuvFrame->data,
         g_yuvFrame->linesize);
+    sws_freeContext(localCtx);
+    av_frame_free(&srcFrame);
     auto end = std::chrono::high_resolution_clock::now();
     totalConvertTime += std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 

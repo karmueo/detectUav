@@ -39,7 +39,7 @@ class DataInputThread : public AclLiteThread
                     int           postThreadNum,
                     uint32_t      batch,
                     int           framesPerSecond,
-                    int           frameSkip = 2);
+            int           frameSkip = 0);
 
     ~DataInputThread();
     AclLiteError Init();
@@ -86,7 +86,7 @@ class DataInputThread : public AclLiteThread
     int64_t realWaitTime_;
     int64_t waitTime_;
     int     framesPerSecond_;
-    int     frameSkip_;  // 跳帧参数:每frameSkip帧处理1帧,默认2
+    int     frameSkip_;  // 跳帧参数: 跳过 frameSkip_ 帧; 0 = 不跳帧 (process every frame)
     
     // ============ 跟踪状态管理 ============
     int     trackThreadId_;              // 跟踪线程id

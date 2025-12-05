@@ -7,7 +7,7 @@
 class PushRtspThread : public AclLiteThread
 {
   public:
-    PushRtspThread(std::string rtspUrl);
+    PushRtspThread(std::string rtspUrl, VencConfig vencConfig = VencConfig());
     ~PushRtspThread();
     AclLiteError Init();
     AclLiteError Process(int msgId, std::shared_ptr<void> msgData);
@@ -18,4 +18,5 @@ class PushRtspThread : public AclLiteThread
     PicToRtsp   g_picToRtsp;
     uint64_t    g_frameSeq;
     std::string g_rtspUrl;
+    VencConfig  g_vencConfig;
 };

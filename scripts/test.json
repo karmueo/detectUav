@@ -8,7 +8,7 @@
                     "model_width":640,
                     "model_heigth":640,
                     "model_batch": 1,
-                    "frame_skip":1,
+                    "frame_decimation": 0,
                     "track_config":{
                         "enable_tracking": true,
                         "track_model_path":"./model/mixformerv2_online_small_bs1.om",
@@ -25,7 +25,21 @@
                             "input_type":"rtsp",
                             "output_path": "rtsp://192.168.1.80/live/uav",
                             "output_type": "rtsp",
-                            "channel_id":0
+                            "channel_id":0,
+                            "rtsp_config": {
+                                "output_width": 1280,
+                                "output_height": 720,
+                                "output_fps": 20,
+                                "transport": "udp",
+                                "buffer_size": 1024000,
+                                "max_delay": 200000
+                            },
+                            "h264_config": {
+                                "gop_size": 25,
+                                "rc_mode": 2,
+                                "max_bitrate": 10000,
+                                "profile": "main"
+                            }
                         }
                     ]
                 }

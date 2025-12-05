@@ -16,9 +16,6 @@
 using namespace std;
 namespace
 {
-uint32_t kKeyFrameInterval = 16;        // 关键帧间隔（GOP大小），影响：增大减少码率但增加寻址延迟，减小增加码率但改善实时性
-uint32_t kRcMode = 2;                   // 码率控制模式（0:CBR恒定码率, 1:VBR可变码率, 2:AVBR自适应可变码率），影响：AVBR平衡质量和码率
-uint32_t kMaxBitRate = 10000;           // 最大码率（kbps），影响：增大提高视频质量但增加带宽占用，减小降低质量但节省带宽
 uint32_t kVencQueueSize = 256;          // 编码队列大小，影响：增大减少丢帧但增加内存占用和延迟，减小减少内存但可能丢帧
 uint32_t kImageEnQueueRetryTimes = 3;   // 图像入队重试次数，影响：增大提高成功率但增加延迟，减小减少延迟但可能失败
 uint32_t kEnqueueWait = 10000;          // 入队等待时间（微秒），影响：增大减少CPU占用但增加延迟，减小减少延迟但增加CPU占用
@@ -393,9 +390,10 @@ AclLiteError DvppVenc::CreateVencChannel()
     aclvencSetChannelDescPicFormat(vencChannelDesc_, vencInfo_.format);
     aclvencSetChannelDescPicWidth(vencChannelDesc_, vencInfo_.maxWidth);
     aclvencSetChannelDescPicHeight(vencChannelDesc_, vencInfo_.maxHeight);
-    aclvencSetChannelDescKeyFrameInterval(vencChannelDesc_, kKeyFrameInterval);
-    aclvencSetChannelDescRcMode(vencChannelDesc_, kRcMode);
-    aclvencSetChannelDescMaxBitRate(vencChannelDesc_, kMaxBitRate);
+    // 使用配置的GOP大小、码率控制模式和最大码率
+    aclvencSetChannelDescKeyFrameInterval(vencChannelDesc_, vencInfo_.gopSize);
+    aclvencSetChannelDescRcMode(vencChannelDesc_, vencInfo_.rcMode);
+    aclvencSetChannelDescMaxBitRate(vencChannelDesc_, vencInfo_.maxBitrate);
 
     aclError ret = aclvencCreateChannel(vencChannelDesc_);
     if (ret != ACL_SUCCESS)

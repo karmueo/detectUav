@@ -28,8 +28,6 @@ using namespace std;
 
 namespace
 {
-const uint32_t kOutputWidth = 1920;   // 与PushRtspThread保持一致
-const uint32_t kOutputHeigth = 1080;  // 与PushRtspThread保持一致
 const uint32_t kSleepTime = 500;
 uint32_t       kWaitTime = 1000;
 const uint32_t kOneSec = 1000000;
@@ -38,14 +36,16 @@ const uint32_t kCountFps = 100;
 } // namespace
 
 DataOutputThread::DataOutputThread(aclrtRunMode &runMode,
-                                   string        outputDataType,
-                                   string        outputPath,
-                                   int           postThreadNum)
-    : runMode_(runMode),
-      outputDataType_(outputDataType),
-      outputPath_(outputPath),
-      shutdown_(0),
-      postNum_(postThreadNum)
+                                                                     string        outputDataType,
+                                                                     string        outputPath,
+                                                                     int           postThreadNum,
+                                                                     VencConfig    vencConfig)
+        : runMode_(runMode),
+            outputDataType_(outputDataType),
+            outputPath_(outputPath),
+            shutdown_(0),
+            postNum_(postThreadNum),
+            g_vencConfig(vencConfig)
 {
 }
 
@@ -55,6 +55,7 @@ DataOutputThread::~DataOutputThread()
     {
         outputVideo_.release();
     }
+    dvpp_.DestroyResource();
 }
 
 AclLiteError DataOutputThread::SetOutputVideo()
@@ -62,16 +63,24 @@ AclLiteError DataOutputThread::SetOutputVideo()
     stringstream sstream;
     sstream.str("");
     sstream << outputPath_;
-    int fps = 15;
+    int fps = g_vencConfig.outputFps > 0 ? g_vencConfig.outputFps : 15;
     outputVideo_.open(sstream.str(),
                       cv::VideoWriter::fourcc('m', 'p', '4', 'v'),
                       fps,
-                      cv::Size(kOutputWidth, kOutputHeigth));
+                      cv::Size(g_vencConfig.outputWidth, g_vencConfig.outputHeight));
     return ACLLITE_OK;
 }
 
 AclLiteError DataOutputThread::Init()
 {
+    // 初始化 dvpp 仅在 RTSP 输出时需要（用于YUV Resize）
+    if (outputDataType_ == "rtsp") {
+        AclLiteError dvppRet = dvpp_.Init("DVPP_CHNMODE_VPC");
+        if (dvppRet != ACLLITE_OK) {
+            ACLLITE_LOG_ERROR("DataOutput dvpp init failed, error %d", dvppRet);
+            return ACLLITE_ERROR;
+        }
+    }
     if (outputDataType_ == "video")
     {
         AclLiteError ret = SetOutputVideo();
@@ -126,7 +135,6 @@ AclLiteError DataOutputThread::Process(int msgId, shared_ptr<void> data)
 
 AclLiteError DataOutputThread::ShutDownProcess()
 {
-    int flag = 0;
     for (int i = 0; i < postNum_; i++)
     {
         if (!postQueue_[i].empty())
@@ -134,7 +142,7 @@ AclLiteError DataOutputThread::ShutDownProcess()
             shared_ptr<DetectDataMsg> detectDataMsg = postQueue_[i].front();
             ProcessOutput(detectDataMsg);
             postQueue_[i].pop();
-            flag++;
+            // processed one item
         }
     }
     if (outputDataType_ != "rtsp")
@@ -320,15 +328,15 @@ DataOutputThread::SaveResultVideo(shared_ptr<DetectDataMsg> &detectDataMsg)
 {
     // Pre-allocate resized Mat to avoid per-frame allocation
     static cv::Mat resizedFrame;
-    if (resizedFrame.empty() || resizedFrame.rows != (int)kOutputHeigth || 
-        resizedFrame.cols != (int)kOutputWidth) {
-        resizedFrame = cv::Mat((int)kOutputHeigth, (int)kOutputWidth, CV_8UC3);
+    if (resizedFrame.empty() || resizedFrame.rows != (int)g_vencConfig.outputHeight || 
+        resizedFrame.cols != (int)g_vencConfig.outputWidth) {
+        resizedFrame = cv::Mat((int)g_vencConfig.outputHeight, (int)g_vencConfig.outputWidth, CV_8UC3);
     }
     
     for (int i = 0; i < detectDataMsg->frame.size(); i++)
     {
         cv::resize(detectDataMsg->frame[i], resizedFrame,
-                   cv::Size(kOutputWidth, kOutputHeigth),
+               cv::Size(g_vencConfig.outputWidth, g_vencConfig.outputHeight),
                    0, 0, cv::INTER_LINEAR);
         outputVideo_ << resizedFrame;
     }
@@ -393,15 +401,15 @@ DataOutputThread::SendCVImshow(shared_ptr<DetectDataMsg> &detectDataMsg)
 {
     // Pre-allocate resized Mat to avoid per-frame allocation
     static cv::Mat resizedFrame;
-    if (resizedFrame.empty() || resizedFrame.rows != (int)kOutputHeigth || 
-        resizedFrame.cols != (int)kOutputWidth) {
-        resizedFrame = cv::Mat((int)kOutputHeigth, (int)kOutputWidth, CV_8UC3);
+    if (resizedFrame.empty() || resizedFrame.rows != (int)g_vencConfig.outputHeight || 
+        resizedFrame.cols != (int)g_vencConfig.outputWidth) {
+        resizedFrame = cv::Mat((int)g_vencConfig.outputHeight, (int)g_vencConfig.outputWidth, CV_8UC3);
     }
     
     for (int i = 0; i < detectDataMsg->frame.size(); i++)
     {
         cv::resize(detectDataMsg->frame[i], resizedFrame,
-                   cv::Size(kOutputWidth, kOutputHeigth));
+               cv::Size(g_vencConfig.outputWidth, g_vencConfig.outputHeight));
         cv::imshow("frame", resizedFrame);
         cv::waitKey(kWaitTime);
     }
@@ -455,16 +463,32 @@ DataOutputThread::DisplayMsgSend(shared_ptr<DetectDataMsg> detectDataMsg)
 AclLiteError
 DataOutputThread::SendImageToRtsp(shared_ptr<DetectDataMsg> &detectDataMsg)
 {
-    // Resize图像到推流分辨率
-    /* for (int i = 0; i < detectDataMsg->frame.size(); i++)
-    {
-        cv::resize(detectDataMsg->frame[i],
-                   detectDataMsg->frame[i],
-                   cv::Size(kOutputWidth, kOutputHeigth),
-                   0,
-                   0,
-                   cv::INTER_LINEAR);
-    } */
+    // Resize 图像到推流分辨率: 使用 DVPP 进行 YUV Resize 并替换 decodedImg
+    for (int i = 0; i < detectDataMsg->decodedImg.size(); i++) {
+        ImageData &srcImg = detectDataMsg->decodedImg[i];
+        if (srcImg.width != g_vencConfig.outputWidth || srcImg.height != g_vencConfig.outputHeight) {
+            ImageData resizedImg;
+            AclLiteError ret = dvpp_.Resize(resizedImg, srcImg, g_vencConfig.outputWidth, g_vencConfig.outputHeight);
+            if (ret != ACLLITE_OK) {
+                ACLLITE_LOG_ERROR("Dvpp resize in DataOutput failed, error %d", ret);
+                return ACLLITE_ERROR;
+            }
+            // replace decoded image with resized one
+            detectDataMsg->decodedImg[i] = resizedImg;
+            // 同时更新对应的 cv::Mat frame，以便 video/show 使用（拷贝到Host）
+            ImageData hostImg;
+            ret = CopyImageToLocal(hostImg, resizedImg, runMode_);
+            if (ret == ACLLITE_OK) {
+                cv::Mat yuvimg(hostImg.height * 3 / 2,
+                               hostImg.width,
+                               CV_8UC1,
+                               hostImg.data.get());
+                cv::Mat bgr;
+                cv::cvtColor(yuvimg, bgr, CV_YUV2BGR_NV12);
+                detectDataMsg->frame[i] = bgr;
+            }
+        }
+    }
     
     AclLiteError ret = DisplayMsgSend(detectDataMsg);
     if (ret != ACLLITE_OK)

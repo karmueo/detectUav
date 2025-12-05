@@ -25,13 +25,13 @@ class PicToRtsp
     PicToRtsp();
     ~PicToRtsp();
 
-    int AvInit(int picWidth, int picHeight, std::string g_outFile, aclrtContext context = nullptr);
+    int AvInit(int picWidth, int picHeight, std::string g_outFile, aclrtContext context = nullptr, VencConfig vencConfig = VencConfig());
 
     void YuvDataInit();
     void BgrDataInint();
 
     int YuvDataToRtsp(void *dataBuf, uint32_t size, uint32_t seq);
-    int BgrDataToRtsp(void *dataBuf, uint32_t size, uint32_t seq);
+    int BgrDataToRtsp(void *dataBuf, uint32_t size, uint32_t srcW, uint32_t srcH, uint32_t seq);
     // 直接使用已构造好的 YUV ImageData 进行编码推流（无需尺寸与格式转换）
     int ImageDataToRtsp(ImageData &imageData, uint32_t seq);
     int FlushEncoder();

@@ -287,19 +287,30 @@ AclLiteError Tracking::Process(int msgId, std::shared_ptr<void> data)
         
         if (!tracking_initialized_)
         {
-            // 跟踪未初始化,需要检测
-            ACLLITE_LOG_WARNING("[Tracking Ch%d] Not initialized, requesting detection",
-                                detectDataMsg->channelId);
-            detectDataMsg->trackingActive = false;
-            detectDataMsg->needRedetection = true;
-            detectDataMsg->trackingConfidence = 0.0f;
-            
-            // 反馈状态给DataInput
-            SendTrackingStateFeedback(detectDataMsg);
+            // 跟踪未初始化,需要检测 - 只在首次发送状态反馈
+            static bool hasRequestedDetection = false;
+            if (!hasRequestedDetection)
+            {
+                ACLLITE_LOG_WARNING("[Tracking Ch%d] Not initialized, requesting detection",
+                                    detectDataMsg->channelId);
+                detectDataMsg->trackingActive = false;
+                detectDataMsg->needRedetection = true;
+                detectDataMsg->trackingConfidence = 0.0f;
+                
+                // 反馈状态给DataInput
+                SendTrackingStateFeedback(detectDataMsg);
+                hasRequestedDetection = true;
+            }
             
             // 仍然发送到输出(显示原图)
             MsgSend(detectDataMsg);
             return ACLLITE_OK;
+        }
+        
+        // 已初始化，重置标志（用于下次跟踪丢失）
+        {
+            static bool hasRequestedDetection = false;
+            hasRequestedDetection = false;
         }
         
         // 执行跟踪

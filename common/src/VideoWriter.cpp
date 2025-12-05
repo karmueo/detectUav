@@ -56,10 +56,14 @@ void VideoWriter::DestroyResource()
 {
     if (isReleased_)
         return;
-    dvppVenc_->DestroyResource();
-    // release dvpp venc
-    delete dvppVenc_;
-    dvppVenc_ = nullptr;
+    
+    if (dvppVenc_ != nullptr)
+    {
+        // VencHelper::DestroyResource will stop threads and cleanup
+        dvppVenc_->DestroyResource();
+        delete dvppVenc_;
+        dvppVenc_ = nullptr;
+    }
     isReleased_ = true;
 }
 

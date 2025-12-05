@@ -17,7 +17,8 @@ PushRtspThread::PushRtspThread(std::string rtspUrl)
     ACLLITE_LOG_INFO("PushRtspThread URL : %s", g_rtspUrl.c_str());
 }
 
-PushRtspThread::~PushRtspThread() { g_picToRtsp.FlushEncoder(); }
+// FlushEncoder will be called in PicToRtsp destructor
+PushRtspThread::~PushRtspThread() {}
 
 AclLiteError PushRtspThread::Init()
 {

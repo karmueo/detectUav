@@ -61,6 +61,7 @@ class PicToRtsp
     std::thread             g_pushThread;
     std::atomic<bool>       g_pushThreadRunning;
     uint64_t                g_frameSeq;
+    bool                    g_flushed; // guard repeated flush/free
 
     // 图像格式转换相关
     AVFrame           *g_rgbFrame;

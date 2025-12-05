@@ -68,6 +68,7 @@ DataInputThread::DataInputThread(int32_t       deviceId,
       currentTrackingConfidence_(0.0f),
     isFirstFrame_(true)
     , lastIsTrackingMode_(false)
+    , lastTrackingLostTime_(0)
 {
 }
 
@@ -234,6 +235,19 @@ AclLiteError DataInputThread::Process(int msgId, shared_ptr<void> msgData)
                 
                 if (trackStateMsg->needRedetection)
                 {
+                    // 防抖: 只有距离上次跟踪丢失超过200ms才处理新的跟踪丢失消息
+                    struct timeval tv;
+                    gettimeofday(&tv, nullptr);
+                    int64_t currentTime = tv.tv_sec * 1000000 + tv.tv_usec;
+                    int64_t debounceIntervalUs = 200000; // 200ms
+                    
+                    if (currentTime - lastTrackingLostTime_ < debounceIntervalUs)
+                    {
+                        // 忽略重复的跟踪丢失消息
+                        break;
+                    }
+                    lastTrackingLostTime_ = currentTime;
+                    
                     ACLLITE_LOG_INFO("[DataInput Ch%d] Tracking lost (conf=%.3f), switching to detection mode",
                                      channelId_, currentTrackingConfidence_);
                     isTrackingActive_ = false;

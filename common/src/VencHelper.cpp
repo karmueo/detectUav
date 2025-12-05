@@ -24,13 +24,14 @@ uint32_t kImageEnQueueRetryTimes = 3;   // 图像入队重试次数，影响：�
 uint32_t kEnqueueWait = 10000;          // 入队等待时间（微秒），影响：增大减少CPU占用但增加延迟，减小减少延迟但增加CPU占用
 uint32_t kOutqueueWait = 10000;         // 出队等待时间（微秒），影响：增大减少CPU占用但增加延迟，减小减少延迟但增加CPU占用
 uint32_t kAsyncWait = 10000;            // 异步等待时间（微秒），影响：增大减少CPU占用但增加初始化延迟，减小减少延迟但增加CPU占用
-bool     g_runFlag = true;              // 全局运行标志，影响：控制编码器运行状态
 } // namespace
 
 VencHelper::VencHelper(VencConfig &vencInfo)
-    : vencInfo_(vencInfo), status_(STATUS_VENC_INIT), vencProc_(nullptr),
-      frameImageQueue_(kVencQueueSize)
+        : vencInfo_(vencInfo), status_(STATUS_VENC_INIT), vencProc_(nullptr),
+            frameImageQueue_(kVencQueueSize)
 {
+        // allocate once; ownership managed in DestroyResource
+        vencProc_ = new DvppVenc(vencInfo_);
 }
 
 VencHelper::~VencHelper() { DestroyResource(); }
@@ -52,6 +53,11 @@ AclLiteError VencHelper::Init()
         }
     }
 
+    if (vencProc_ == nullptr)
+    {
+        vencProc_ = new DvppVenc(vencInfo_);
+    }
+
     thread asyncVencTh = thread(VencHelper::AsyncVencThreadEntry, (void *)this);
     asyncVencTh.detach();
     while (status_ == STATUS_VENC_INIT)
@@ -71,9 +77,12 @@ AclLiteError VencHelper::Init()
 void VencHelper::AsyncVencThreadEntry(void *arg)
 {
     VencHelper *thisPtr = (VencHelper *)arg;
-    DvppVenc    venc(thisPtr->vencInfo_);
+    if (thisPtr == nullptr || thisPtr->vencProc_ == nullptr)
+    {
+        return;
+    }
 
-    AclLiteError ret = venc.Init();
+    AclLiteError ret = thisPtr->vencProc_->Init();
     if (ret != ACLLITE_OK)
     {
         thisPtr->SetStatus(STATUS_VENC_ERROR);
@@ -91,7 +100,7 @@ void VencHelper::AsyncVencThreadEntry(void *arg)
             continue;
         }
 
-        ret = venc.Process(*image.get());
+        ret = thisPtr->vencProc_->Process(*image.get());
         if (ret != ACLLITE_OK)
         {
             thisPtr->SetStatus(STATUS_VENC_ERROR);
@@ -100,7 +109,7 @@ void VencHelper::AsyncVencThreadEntry(void *arg)
         }
     }
 
-    venc.Finish();
+    thisPtr->vencProc_->Finish();
     thisPtr->SetStatus(STATUS_VENC_EXIT);
 }
 
@@ -140,12 +149,24 @@ shared_ptr<ImageData> VencHelper::GetEncodeImage()
     return image;
 }
 
-void VencHelper::DestroyResource() { vencProc_->Finish(); }
+void VencHelper::DestroyResource()
+{
+    // stop async loop
+    SetStatus(STATUS_VENC_EXIT);
+
+    if (vencProc_ != nullptr)
+    {
+        vencProc_->StopSubscribeThread();
+        // Note: Don't call Finish() here, it will be called in DvppVenc::DestroyResource()
+        delete vencProc_;
+        vencProc_ = nullptr;
+    }
+}
 
 DvppVenc::DvppVenc(VencConfig &vencInfo)
     : vencInfo_(vencInfo), threadId_(0), vencChannelDesc_(nullptr),
       vencFrameConfig_(nullptr), inputPicDesc_(nullptr), vencStream_(nullptr),
-      outFp_(nullptr), isFinished_(false)
+      outFp_(nullptr), isFinished_(false), runFlag_(true)
 {
 }
 
@@ -268,8 +289,16 @@ AclLiteError DvppVenc::Init()
     return InitResource();
 }
 
-void *DvppVenc::SubscribleThreadFunc(aclrtContext sharedContext)
+void *DvppVenc::SubscribleThreadFunc(void *arg)
 {
+    DvppVenc *venc = (DvppVenc *)arg;
+    if (venc == nullptr)
+    {
+        ACLLITE_LOG_ERROR("DvppVenc instance is nullptr");
+        return ((void *)(-1));
+    }
+    
+    aclrtContext sharedContext = venc->vencInfo_.context;
     if (sharedContext == nullptr)
     {
         ACLLITE_LOG_ERROR("sharedContext can not be nullptr");
@@ -284,12 +313,13 @@ void *DvppVenc::SubscribleThreadFunc(aclrtContext sharedContext)
         return ((void *)(-1));
     }
 
-    while (g_runFlag)
+    while (venc->runFlag_)
     {
         // Notice: timeout 1000ms
         (void)aclrtProcessReport(1000);
     }
 
+    ACLLITE_LOG_INFO("Vdec subscribe thread exit!");
     return (void *)0;
 }
 
@@ -303,11 +333,11 @@ AclLiteError DvppVenc::InitResource()
     }
 
     // create process callback thread
-    AclLiteError ret = pthread_create(&threadId_,
-                                      nullptr,
-                                      &DvppVenc::SubscribleThreadFunc,
-                                      vencInfo_.context);
-    if (ret != ACLLITE_OK)
+    int ret = pthread_create(&threadId_,
+                             nullptr,
+                             &DvppVenc::SubscribleThreadFunc,
+                             (void *)this);
+    if (ret != 0)
     {
         ACLLITE_LOG_ERROR("Create venc subscrible thread failed, error %d",
                           ret);
@@ -525,8 +555,11 @@ void DvppVenc::Finish()
         return;
     }
 
-    fclose(outFp_);
-    outFp_ = nullptr;
+    if (outFp_ != nullptr)
+    {
+        fclose(outFp_);
+        outFp_ = nullptr;
+    }
     isFinished_ = true;
     ACLLITE_LOG_INFO("venc process success");
 
@@ -536,6 +569,19 @@ void DvppVenc::Finish()
 void DvppVenc::DestroyResource()
 {
     Finish();
+
+    // 等待订阅线程退出
+    if (threadId_ != 0)
+    {
+        runFlag_ = false;
+        void *res;
+        int joinRet = pthread_join(threadId_, &res);
+        if (joinRet != 0)
+        {
+            ACLLITE_LOG_ERROR("Join venc subscribe thread failed, error %d", joinRet);
+        }
+        threadId_ = 0;
+    }
 
     if (vencChannelDesc_ != nullptr)
     {

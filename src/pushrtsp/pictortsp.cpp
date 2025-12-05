@@ -25,23 +25,23 @@ PicToRtsp::PicToRtsp()
     this->g_videoWriter = nullptr;
     this->g_frameSeq = 0;
     this->g_pushThreadRunning = false;
+    this->g_flushed = false;
 }
 
 PicToRtsp::~PicToRtsp()
 {
-    // 停止推流线程
-    g_pushThreadRunning = false;
-    g_queueCond.notify_all();
-    if (g_pushThread.joinable())
-    {
-        g_pushThread.join();
-    }
-    
+    // 确保释放流程仅执行一次
+    FlushEncoder();
+
     av_packet_free(&g_pkt);
     if (g_fmtCtx)
     {
-        avio_close(g_fmtCtx->pb);
+        if (g_fmtCtx->pb)
+        {
+            avio_close(g_fmtCtx->pb);
+        }
         avformat_free_context(g_fmtCtx);
+        g_fmtCtx = nullptr;
     }
     if (g_videoWriter)
     {
@@ -358,25 +358,69 @@ int PicToRtsp::FlushEncoder()
 {
     ACLLITE_LOG_INFO("Flushing encoder and closing RTSP stream");
 
+    // 避免重复执行资源释放
+    if (g_flushed)
+    {
+        return ACLLITE_OK;
+    }
+
+    // 先停推流线程，防止线程在释放 FFmpeg 资源后仍访问
+    if (g_pushThreadRunning)
+    {
+        g_pushThreadRunning = false;
+        g_queueCond.notify_all();
+        if (g_pushThread.joinable())
+        {
+            g_pushThread.join();
+            ACLLITE_LOG_INFO("Push thread exited");
+        }
+    }
+
     // 写入RTSP流尾
-    av_write_trailer(g_fmtCtx);
+    if (g_fmtCtx)
+    {
+        av_write_trailer(g_fmtCtx);
+    }
 
     // 清理资源
     if (this->g_bgrToRtspFlag == true)
     {
-        av_free(g_brgBuf);
-        av_free(g_yuvBuf);
-        sws_freeContext(g_imgCtx);
+        if (g_brgBuf)
+        {
+            av_free(g_brgBuf);
+            g_brgBuf = nullptr;
+        }
+        if (g_yuvBuf)
+        {
+            av_free(g_yuvBuf);
+            g_yuvBuf = nullptr;
+        }
+        if (g_imgCtx)
+        {
+            sws_freeContext(g_imgCtx);
+            g_imgCtx = nullptr;
+        }
         if (g_rgbFrame)
+        {
             av_frame_free(&g_rgbFrame);
+        }
         if (g_yuvFrame)
+        {
             av_frame_free(&g_yuvFrame);
+        }
+        this->g_bgrToRtspFlag = false;
     }
-    if (this->g_yuvToRtspFlag == true)
+    else if (this->g_yuvToRtspFlag == true)
     {
-        av_free(g_yuvBuf);
+        if (g_yuvBuf)
+        {
+            av_free(g_yuvBuf);
+            g_yuvBuf = nullptr;
+        }
+        this->g_yuvToRtspFlag = false;
     }
 
+    g_flushed = true;
     return ACLLITE_OK;
 }
 

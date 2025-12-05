@@ -15,7 +15,7 @@
                         "tracking_config":{
                             "confidence_active_threshold": 0.60,
                             "confidence_redetect_threshold": 0.60,
-                            "max_track_loss_frames": 1,
+                            "max_track_loss_frames": 5,
                             "score_decay_factor": 0.98
                         }
                     },
@@ -23,8 +23,8 @@
                         {
                             "input_path":"rtsp://192.168.1.80:8554/uav2.264",
                             "input_type":"rtsp",
-                            "output_path":"rtsp://192.168.1.80/live/uav",
-                            "output_type":"rtsp",
+                            "output_path": "rtsp://192.168.1.80/live/uav",
+                            "output_type": "rtsp",
                             "channel_id":0
                         }
                     ]

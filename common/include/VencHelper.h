@@ -27,6 +27,7 @@ class DvppVenc
     AclLiteError Init();
     AclLiteError Process(ImageData &image);
     void         Finish();
+    void         StopSubscribeThread() { runFlag_ = false; }
 
   private:
     AclLiteError InitResource();
@@ -52,6 +53,7 @@ class DvppVenc
 
     FILE *outFp_;
     bool  isFinished_;
+    bool  runFlag_;  // 实例级运行标志
 };
 
 class VencHelper

@@ -94,6 +94,7 @@ class DataInputThread : public AclLiteThread
     float   currentTrackingConfidence_;  // 当前跟踪置信度
     bool    isFirstFrame_;               // 是否是第一帧(首帧必须进行检测)
     bool    lastIsTrackingMode_;          // 用于记录上一次是否在跟踪模式, 仅在状态切换时打印日志
+    int64_t lastTrackingLostTime_;       // 上次跟踪丢失时间戳(微秒), 用于防止重复处理
 };
 
 #endif

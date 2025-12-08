@@ -92,6 +92,7 @@ void DrawRect(
     const YUVColor &color,
     int             lineWidth)
 {
+    // Draw an open rectangle using corner segments instead of solid edges.
     if (x1 > x2)
     {
         std::swap(x1, x2);
@@ -108,53 +109,43 @@ void DrawRect(
     int width = (int)image.width;
     int height = (int)image.height;
 
-    jBound = std::min(height, y1 + lineWidth);
-    iBound = std::min(width - 1, x2);
-
-    for (j = y1; j < jBound; ++j)
+    auto DrawBlock = [&](int xs, int ys, int xe, int ye)
     {
-        for (i = x1; i <= iBound; ++i)
+        if (xs > xe || ys > ye)
         {
-            SetPixel(image, i, j, color);
+            return;
         }
-    }
 
-    jStart = std::max(0, y2 - lineWidth + 1);
-    jBound = std::min(height - 1, y2);
+        xs = std::max(0, xs);
+        ys = std::max(0, ys);
+        xe = std::min(width - 1, xe);
+        ye = std::min(height - 1, ye);
 
-    iStart = std::max(0, x1);
-    iBound = std::min(width - 1, x2);
-
-    for (j = jStart; j <= jBound; ++j)
-    {
-        for (i = iStart; i <= iBound; ++i)
+        for (int row = ys; row <= ye; ++row)
         {
-            SetPixel(image, i, j, color);
+            for (int col = xs; col <= xe; ++col)
+            {
+                SetPixel(image, col, row, color);
+            }
         }
-    }
+    };
 
-    iBound = std::min(width, x1 + lineWidth);
-    jBound = std::min(height - 1, y2);
+    int box_width = x2 - x1 + 1;
+    int box_height = y2 - y1 + 1;
+    int min_dim = std::min(box_width, box_height);
+    int corner_len = std::max(lineWidth * 3, min_dim / 4);
+    corner_len = std::min(corner_len, min_dim);
 
-    for (i = x1; i < iBound; ++i)
-    {
-        for (j = y1; j <= jBound; ++j)
-        {
-            SetPixel(image, i, j, color);
-        }
-    }
-
-    iStart = std::max(0, (x2 - lineWidth + 1));
-    iBound = std::min(width - 1, x2);
-
-    jStart = std::max(0, y1);
-    jBound = std::min(height - 1, y2);
-
-    for (i = iStart; i <= iBound; ++i)
-    {
-        for (j = jStart; j <= jBound; ++j)
-        {
-            SetPixel(image, i, j, color);
-        }
-    }
+    // Top corners
+    DrawBlock(x1, y1, x1 + corner_len - 1, y1 + lineWidth - 1);
+    DrawBlock(x2 - corner_len + 1, y1, x2, y1 + lineWidth - 1);
+    // Bottom corners
+    DrawBlock(x1, y2 - lineWidth + 1, x1 + corner_len - 1, y2);
+    DrawBlock(x2 - corner_len + 1, y2 - lineWidth + 1, x2, y2);
+    // Left vertical corners
+    DrawBlock(x1, y1, x1 + lineWidth - 1, y1 + corner_len - 1);
+    DrawBlock(x1, y2 - corner_len + 1, x1 + lineWidth - 1, y2);
+    // Right vertical corners
+    DrawBlock(x2 - lineWidth + 1, y1, x2, y1 + corner_len - 1);
+    DrawBlock(x2 - lineWidth + 1, y2 - corner_len + 1, x2, y2);
 }

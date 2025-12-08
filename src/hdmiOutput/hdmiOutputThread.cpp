@@ -401,11 +401,26 @@ AclLiteError HdmiOutputThread::DisplayFrame(const ImageData &image)
     }
 
     // NOTE: send to video layer (not VO device) to ensure the frame shows up.
-    hi_s32 ret = hi_mpi_vo_send_frame(layerId_, 0, &user_frame, 0);
+    // Keep retrying for a short window to avoid dropping decimated frames.
+    const int maxRetry = 50; // ~100ms with 2ms sleep
+    hi_s32 ret = HI_FAILURE;
+    for (int attempt = 0; attempt < maxRetry; ++attempt) {
+        ret = hi_mpi_vo_send_frame(layerId_, 0, &user_frame, 0);
+        if (ret == HI_SUCCESS) {
+            break;
+        }
+        if (attempt == 0 || (attempt + 1) % 10 == 0) {
+            ACLLITE_LOG_WARNING("hi_mpi_vo_send_frame failed (0x%x) attempt %d/%d", ret, attempt + 1, maxRetry);
+        }
+        usleep(2000); // short backoff to let VO consume previous frame
+    }
     
     if (ret != HI_SUCCESS) {
-        ACLLITE_LOG_ERROR("hi_mpi_vo_send_frame failed, ret=0x%x (devId=%d)", ret, devId_);
-        return ACLLITE_ERROR;
+        static int dropCount = 0;
+        if (++dropCount % 10 == 0) {
+            ACLLITE_LOG_ERROR("hi_mpi_vo_send_frame keep failing, dropped %d frames (last ret=0x%x)", dropCount, ret);
+        }
+        return ACLLITE_OK;
     }
     return ACLLITE_OK;
 }

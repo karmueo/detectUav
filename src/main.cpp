@@ -226,8 +226,9 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                     vencConfig.maxWidth = modelWidth;
                     vencConfig.maxHeight = modelHeigth;
                     
-                    // 解析 rtsp_config
-                    if (root["device_config"][i]["model_config"][j]["io_info"][k]["rtsp_config"].type() != Json::nullValue)
+                    // 解析 rtsp_config（仅 rtsp 输出生效）
+                    if (outputType == "rtsp" &&
+                        root["device_config"][i]["model_config"][j]["io_info"][k]["rtsp_config"].type() != Json::nullValue)
                     {
                         Json::Value rtspCfg = root["device_config"][i]["model_config"][j]["io_info"][k]["rtsp_config"];
                         if (rtspCfg["output_width"].type() != Json::nullValue)
@@ -258,6 +259,30 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                         if (rtspCfg["max_delay"].type() != Json::nullValue)
                         {
                             vencConfig.rtspMaxDelay = rtspCfg["max_delay"].asUInt();
+                        }
+                    }
+
+                    // 解析 hdmi_config（仅 hdmi 输出生效）
+                    if (outputType == "hdmi" &&
+                        root["device_config"][i]["model_config"][j]["io_info"][k]["hdmi_config"].type() != Json::nullValue)
+                    {
+                        Json::Value hdmiCfg = root["device_config"][i]["model_config"][j]["io_info"][k]["hdmi_config"];
+                        if (hdmiCfg["output_width"].type() != Json::nullValue)
+                        {
+                            vencConfig.outputWidth = hdmiCfg["output_width"].asUInt();
+                        }
+                        if (hdmiCfg["output_height"].type() != Json::nullValue)
+                        {
+                            vencConfig.outputHeight = hdmiCfg["output_height"].asUInt();
+                        }
+                        if (hdmiCfg["output_fps"].type() != Json::nullValue)
+                        {
+                            vencConfig.outputFps = hdmiCfg["output_fps"].asUInt();
+                            if (vencConfig.outputFps < 1 || vencConfig.outputFps > 60)
+                            {
+                                ACLLITE_LOG_WARNING("HDMI output FPS %u out of range [1,60], using default 25", vencConfig.outputFps);
+                                vencConfig.outputFps = 25;
+                            }
                         }
                     }
                     
@@ -481,7 +506,7 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                             (kHdmiDisplayName + to_string(channelId)).c_str());
                         hdmiDisplayParam.context = context;
                         hdmiDisplayParam.runMode = runMode;
-                        hdmiDisplayParam.queueSize = 20;
+                        hdmiDisplayParam.queueSize = 1000; // 与 RTSP 输出一致，避免 decimation 模式下排队失败
                         threadTbl.push_back(hdmiDisplayParam);
                     }
                     kExitCount++;

@@ -31,6 +31,7 @@
           "model_heigth": 640,
           "model_batch": 1,
           "frame_decimation": 0,
+          "target_class_id": 1,
           "track_config": { ... },
           "io_info": [ { ... 每路流的配置 ... } ]
         }
@@ -50,6 +51,7 @@
     - `postnum`（可选，默认 1）：后处理线程数。
     - `frames_per_second`（可选，默认 1000）：输入线程节流上限。
     - `frame_decimation`（可选，默认 0）：每处理 1 帧后跳过 N 帧，`0` 表示不跳帧，可被 `io_info` 覆盖。
+    - `target_class_id`（可选，默认不过滤）：检测后处理的目标类别 ID，仅保留该类别的检测结果，可被 `io_info` 覆盖；缺省或负数时不过滤。
     - `track_config`（可选，模型级默认值）：
       - `enable_tracking`：是否启用跟踪（默认 true）。
       - `track_model_path`：跟踪 `.om` 模型路径。
@@ -65,6 +67,7 @@
       - `output_type`：输出类型；`rtsp` 会启用推流线程。
       - `channel_id`：通道唯一 ID。
       - `frame_decimation`（可选）：覆盖模型级跳帧。
+      - `target_class_id`（可选）：覆盖模型级类别过滤；负数或缺省表示不过滤。
       - `rtsp_config`（可选，推流）：
         - `output_width` / `output_height`：编码尺寸，默认取模型输入尺寸。
         - `output_fps`：1–60，越界会回退到 25。

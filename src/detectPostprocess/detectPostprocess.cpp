@@ -38,13 +38,28 @@ bool sortScore(BoundBox box1, BoundBox box2) { return box1.score > box2.score; }
 DetectPostprocessThread::DetectPostprocessThread(uint32_t      modelWidth,
                                                  uint32_t      modelHeight,
                                                  aclrtRunMode &runMode,
-                                                 uint32_t      batch)
+                                                 uint32_t      batch,
+                                                 int           targetClassId)
     : modelWidth_(modelWidth),
       modelHeight_(modelHeight),
       runMode_(runMode),
       sendLastBatch_(false),
-      batch_(batch)
+      batch_(batch),
+      targetClassId_(targetClassId)
 {
+    if (targetClassId_ >= 0 && targetClassId_ >= static_cast<int>(kNumClasses))
+    {
+        ACLLITE_LOG_WARNING(
+            "Configured target_class_id %d exceeds supported classes [%u), no "
+            "detections will pass the filter",
+            targetClassId_,
+            kNumClasses);
+    }
+    else if (targetClassId_ >= 0)
+    {
+        ACLLITE_LOG_INFO("Enable target class filter: class_id=%d",
+                         targetClassId_);
+    }
 }
 
 DetectPostprocessThread::~DetectPostprocessThread() {}
@@ -158,6 +173,13 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
             // Filter by confidence threshold
             if (score <= kConfThresh)
                 continue;
+            
+            // Optional class-id filtering from config
+            if (targetClassId_ >= 0 &&
+                cls != static_cast<uint32_t>(targetClassId_))
+            {
+                continue;
+            }
 
             // Convert center coordinates to corner coordinates in model input size
             float x1 = cx - w / 2.0f;

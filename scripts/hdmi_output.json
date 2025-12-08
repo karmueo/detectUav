@@ -8,7 +8,8 @@
                     "model_width":640,
                     "model_heigth":640,
                     "model_batch": 1,
-                    "frame_decimation": 5,
+                    "frame_decimation": 2,
+                    "target_class_id": 1,
                     "track_config":{
                         "enable_tracking": true,
                         "track_model_path":"./model/mixformerv2_online_small_bs1.om"

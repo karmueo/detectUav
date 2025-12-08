@@ -14,7 +14,8 @@ class DetectPostprocessThread : public AclLiteThread
     DetectPostprocessThread(uint32_t      modelWidth,
                             uint32_t      modelHeight,
                             aclrtRunMode &runMode,
-                            uint32_t      batch);
+                            uint32_t      batch,
+                            int           targetClassId);
     ~DetectPostprocessThread();
 
     AclLiteError Init();
@@ -31,6 +32,7 @@ class DetectPostprocessThread : public AclLiteThread
     aclrtRunMode runMode_;
     bool         sendLastBatch_;
     uint32_t     batch_;
+    int          targetClassId_; // <0 means no class filtering
 };
 
 #endif

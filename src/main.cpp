@@ -140,6 +140,7 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                 // processing one frame (0 => no skip). Default is 0, and each
                 // io_info 可以单独覆盖。
                 int modelFrameDecimation = 0;
+                int modelTargetClassId = -1; // 默认不过滤类别
                 if (root["device_config"][i]["model_config"][j]["frame_decimation"]
                         .type() != Json::nullValue)
                 {
@@ -150,6 +151,18 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                     {
                         ACLLITE_LOG_WARNING("frame_decimation is negative, clamping to 0");
                         modelFrameDecimation = 0;
+                    }
+                }
+                if (root["device_config"][i]["model_config"][j]["target_class_id"]
+                        .type() != Json::nullValue)
+                {
+                    modelTargetClassId = root["device_config"][i]["model_config"][j]
+                                                 ["target_class_id"]
+                                                     .asInt();
+                    if (modelTargetClassId < 0)
+                    {
+                        ACLLITE_LOG_WARNING("target_class_id is negative at model level, disabling class filter");
+                        modelTargetClassId = -1;
                     }
                 }
                 // Note: legacy field 'frame_skip' is no longer supported. Use 'frame_decimation'.
@@ -344,6 +357,7 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
 
                     // per-channel frame decimation override (defaults to model-level)
                     int channelFrameDecimation = modelFrameDecimation;
+                    int targetClassId = modelTargetClassId;
                     if (root["device_config"][i]["model_config"][j]["io_info"][k]["frame_decimation"]
                             .type() != Json::nullValue)
                     {
@@ -357,6 +371,21 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                                 "io_info[%d] frame_decimation is negative, clamping to 0",
                                 channelId);
                             channelFrameDecimation = 0;
+                        }
+                    }
+                    if (root["device_config"][i]["model_config"][j]["io_info"][k]["target_class_id"]
+                            .type() != Json::nullValue)
+                    {
+                        targetClassId =
+                            root["device_config"][i]["model_config"][j]["io_info"][k]
+                                ["target_class_id"]
+                                    .asInt();
+                        if (targetClassId < 0)
+                        {
+                            ACLLITE_LOG_WARNING(
+                                "io_info[%d] target_class_id is negative, disabling class filter for this channel",
+                                channelId);
+                            targetClassId = -1;
                         }
                     }
 
@@ -395,7 +424,7 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                         AclLiteThreadParam detectPostParam;
                         detectPostParam.threadInst =
                             new DetectPostprocessThread(
-                                modelWidth, modelHeigth, runMode, kBatch);
+                                modelWidth, modelHeigth, runMode, kBatch, targetClassId);
                         detectPostParam.threadInstName.assign(postName.c_str());
                         detectPostParam.context = context;
                         detectPostParam.runMode = runMode;

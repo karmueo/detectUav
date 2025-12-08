@@ -31,6 +31,7 @@
 #include <iostream>
 #include <mutex>
 #include <queue>
+#include <unordered_map>
 #include <unistd.h>
 
 class DataOutputThread : public AclLiteThread
@@ -59,6 +60,9 @@ class DataOutputThread : public AclLiteThread
     AclLiteError SendCVImshow(std::shared_ptr<DetectDataMsg> &detectDataMsg);
     AclLiteError DisplayMsgSend(std::shared_ptr<DetectDataMsg> detectDataMsg);
     AclLiteError SendImageToRtsp(std::shared_ptr<DetectDataMsg> &detectDataMsg);
+    void         UpdateCachedResult(
+                const std::shared_ptr<DetectDataMsg> &detectDataMsg);
+    void ApplyCachedResult(std::shared_ptr<DetectDataMsg> &detectDataMsg);
 
   private:
     aclrtRunMode                               runMode_;
@@ -73,6 +77,15 @@ class DataOutputThread : public AclLiteThread
     int64_t                                    lastRecordTime_;
     VencConfig                                 g_vencConfig;
     AclLiteImageProc                            dvpp_;
+    struct CachedResult
+    {
+        std::vector<DetectionOBB> detections;
+        TrackInfo                 trackingResult;
+        std::vector<std::string>  textPrint;
+        bool                      trackingActive = false;
+        float                     trackingConfidence = 0.0f;
+    };
+    std::unordered_map<uint32_t, CachedResult> lastResults_;
 };
 
 #endif

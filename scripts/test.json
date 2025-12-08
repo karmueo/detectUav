@@ -8,7 +8,7 @@
                     "model_width":640,
                     "model_heigth":640,
                     "model_batch": 1,
-                    "frame_decimation": 0,
+                    "frame_decimation": 5,
                     "track_config":{
                         "enable_tracking": true,
                         "track_model_path":"./model/mixformerv2_online_small_bs1.om",
@@ -27,8 +27,8 @@
                             "output_type": "rtsp",
                             "channel_id":0,
                             "rtsp_config": {
-                                "output_width": 1280,
-                                "output_height": 720,
+                                "output_width": 1920,
+                                "output_height": 1080,
                                 "output_fps": 20,
                                 "transport": "udp",
                                 "buffer_size": 1024000,

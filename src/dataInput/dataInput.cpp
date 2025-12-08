@@ -199,8 +199,10 @@ AclLiteError DataInputThread::Init()
     lastDecodeTime_ = 0;
     waitTime_ = oneSecond / framesPerSecond_;
     
-    ACLLITE_LOG_INFO("DataInputThread initialized: frameSkip=%d (skip %d frames, process 1 frame per %d frames)", 
-                     frameSkip_, frameSkip_, frameSkip_ + 1);
+    ACLLITE_LOG_INFO(
+        "DataInputThread initialized: frameSkip=%d (run heavy pipeline every %d frame, reuse results for skipped frames)",
+        frameSkip_,
+        frameSkip_ + 1);
 
     return ACLLITE_OK;
 }
@@ -368,24 +370,6 @@ DataInputThread::ReadStream(shared_ptr<DetectDataMsg> &detectDataMsg)
     AclLiteError ret = ACLLITE_OK;
     ImageData    decodedImg;
 
-    // 跳帧逻辑:跳过 frameSkip_ 帧（例如: frameSkip_=0 不跳帧，frameSkip_=1 跳过1帧）
-    for (int i = 0; i < frameSkip_; i++)
-    {
-        ImageData skipFrame;
-        ret = cap_->Read(skipFrame);
-        if (ret == ACLLITE_ERROR_DECODE_FINISH)
-        {
-            detectDataMsg->isLastFrame = true;
-            return ACLLITE_ERROR_DECODE_FINISH;
-        }
-        else if (ret != ACLLITE_OK)
-        {
-            detectDataMsg->isLastFrame = true;
-            ACLLITE_LOG_ERROR("Read frame failed during skip, error %d", ret);
-            return ACLLITE_ERROR;
-        }
-    }
-
     while (realWaitTime_ < waitTime_)
     {
         ret = cap_->Read(decodedImg);
@@ -496,6 +480,9 @@ AclLiteError DataInputThread::MsgRead(shared_ptr<DetectDataMsg> &detectDataMsg)
     detectDataMsg->trackingConfidence = currentTrackingConfidence_;
     detectDataMsg->skipInference = isTrackingActive_ && !isFirstFrame_;
     detectDataMsg->needRedetection = false;
+    detectDataMsg->decimatedFrame =
+        frameSkip_ > 0 && (detectDataMsg->msgNum % (frameSkip_ + 1) != 0);
+    detectDataMsg->reusePrevResult = detectDataMsg->decimatedFrame;
     
     msgNum_++;
     GetOneFrame(detectDataMsg);
@@ -523,6 +510,43 @@ AclLiteError DataInputThread::MsgSend(shared_ptr<DetectDataMsg> &detectDataMsg)
     
     if (detectDataMsg->isLastFrame == false)
     {
+        if (detectDataMsg->decimatedFrame)
+        {
+            // 轻量跳帧: 复用上一帧的检测/跟踪结果，仅将当前帧发送到输出
+            detectDataMsg->trackingActive = isTrackingActive_;
+            detectDataMsg->trackingConfidence = currentTrackingConfidence_;
+            while (1)
+            {
+                ret = SendMessage(dataOutputThreadId_,
+                                  MSG_OUTPUT_FRAME,
+                                  detectDataMsg);
+                if (ret == ACLLITE_ERROR_ENQUEUE)
+                {
+                    usleep(kSleepTime);
+                    continue;
+                }
+                else if (ret == ACLLITE_OK)
+                {
+                    break;
+                }
+                else
+                {
+                    ACLLITE_LOG_ERROR(
+                        "Send decimated frame message failed, error %d", ret);
+                    return ret;
+                }
+            }
+
+            ret = SendMessage(selfThreadId_, MSG_READ_FRAME, nullptr);
+            if (ret != ACLLITE_OK)
+            {
+                ACLLITE_LOG_ERROR(
+                    "Send read frame message failed, error %d", ret);
+                return ret;
+            }
+            return ACLLITE_OK;
+        }
+
         // ============ 智能路由逻辑 ============
         // 条件A: 跟踪活跃且不是首帧 -> 直接发送给跟踪线程(跳过推理)
         bool isTrackingMode = detectDataMsg->skipInference &&
@@ -604,6 +628,59 @@ AclLiteError DataInputThread::MsgSend(shared_ptr<DetectDataMsg> &detectDataMsg)
     }
     else
     {
+        if (detectDataMsg->decimatedFrame)
+        {
+            detectDataMsg->trackingActive = isTrackingActive_;
+            detectDataMsg->trackingConfidence = currentTrackingConfidence_;
+            while (1)
+            {
+                ret = SendMessage(dataOutputThreadId_,
+                                  MSG_OUTPUT_FRAME,
+                                  detectDataMsg);
+                if (ret == ACLLITE_ERROR_ENQUEUE)
+                {
+                    usleep(kSleepTime);
+                    continue;
+                }
+                else if (ret == ACLLITE_OK)
+                {
+                    break;
+                }
+                else
+                {
+                    ACLLITE_LOG_ERROR(
+                        "Send decimated last frame failed, error %d", ret);
+                    return ret;
+                }
+            }
+
+            for (int i = 0; i < postThreadNum_; i++)
+            {
+                while (1)
+                {
+                    ret = SendMessage(dataOutputThreadId_,
+                                      MSG_ENCODE_FINISH,
+                                      detectDataMsg);
+                    if (ret == ACLLITE_ERROR_ENQUEUE)
+                    {
+                        usleep(kSleepTime);
+                        continue;
+                    }
+                    else if (ret == ACLLITE_OK)
+                    {
+                        break;
+                    }
+                    else
+                    {
+                        ACLLITE_LOG_ERROR(
+                            "Send encode finish for decimated frame failed, error %d", ret);
+                        return ret;
+                    }
+                }
+            }
+            return ACLLITE_OK;
+        }
+
         for (int i = 0; i < postThreadNum_; i++)
         {
             while (1)

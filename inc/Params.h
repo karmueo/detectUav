@@ -112,6 +112,9 @@ struct DetectDataMsg
     bool   skipInference = false;          // 是否跳过检测推理
     float  trackingConfidence = 0.0f;      // 当前跟踪置信度
     bool   needRedetection = false;        // 是否需要重新检测(跟踪失败时置为true)
+    // ============ 跳帧复用 ============
+    bool   decimatedFrame = false;         // 是否为跳帧(仅做轻量处理)
+    bool   reusePrevResult = false;        // 是否复用上一帧的检测/跟踪结果
 };
 
 #endif

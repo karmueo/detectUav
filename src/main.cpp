@@ -46,7 +46,6 @@ int                  kPostNum = 1;
 int                  kFramesPerSecond = 1000;
 uint32_t             kMsgQueueSize = 3;
 uint32_t             argNum = 2;
-int                  kFrameDecimation = 0; // 新语义: 跳过 N 帧; 0 = 不跳帧
 } // namespace
 
 int MainThreadProcess(uint32_t msgId, shared_ptr<void> msgData, void *userData)
@@ -137,17 +136,19 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                 }
 
                 // New: frame_decimation means how many frames to skip after
-                // processing one frame (0 => no skip). Use only frame_decimation.
-                if (root["device_config"][i]["model_config"][j]
-                        ["frame_decimation"]
-                            .type() != Json::nullValue)
+                // processing one frame (0 => no skip). Default is 0, and each
+                // io_info 可以单独覆盖。
+                int modelFrameDecimation = 0;
+                if (root["device_config"][i]["model_config"][j]["frame_decimation"]
+                        .type() != Json::nullValue)
                 {
-                    kFrameDecimation = root["device_config"][i]["model_config"]
-                                             [j]["frame_decimation"]
-                                                 .asInt();
-                    if (kFrameDecimation < 0) {
+                    modelFrameDecimation = root["device_config"][i]["model_config"][j]
+                                                   ["frame_decimation"]
+                                                       .asInt();
+                    if (modelFrameDecimation < 0)
+                    {
                         ACLLITE_LOG_WARNING("frame_decimation is negative, clamping to 0");
-                        kFrameDecimation = 0;
+                        modelFrameDecimation = 0;
                     }
                 }
                 // Note: legacy field 'frame_skip' is no longer supported. Use 'frame_decimation'.
@@ -314,6 +315,25 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                         kDataOutputName + to_string(channelId);
                     string rtspDisplayName =
                         kRtspDisplayName + to_string(channelId);
+
+                    // per-channel frame decimation override (defaults to model-level)
+                    int channelFrameDecimation = modelFrameDecimation;
+                    if (root["device_config"][i]["model_config"][j]["io_info"][k]["frame_decimation"]
+                            .type() != Json::nullValue)
+                    {
+                        channelFrameDecimation =
+                            root["device_config"][i]["model_config"][j]["io_info"][k]
+                                ["frame_decimation"]
+                                    .asInt();
+                        if (channelFrameDecimation < 0)
+                        {
+                            ACLLITE_LOG_WARNING(
+                                "io_info[%d] frame_decimation is negative, clamping to 0",
+                                channelId);
+                            channelFrameDecimation = 0;
+                        }
+                    }
+
                     // Create Thread for the input data:
                     AclLiteThreadParam dataInputParam;
                     dataInputParam.threadInst =
@@ -326,7 +346,7 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                                             kPostNum,
                                             kBatch,
                                             kFramesPerSecond,
-                                            kFrameDecimation);
+                                            channelFrameDecimation);
                     dataInputParam.threadInstName.assign(dataInputName.c_str());
                     dataInputParam.context = context;
                     dataInputParam.runMode = runMode;

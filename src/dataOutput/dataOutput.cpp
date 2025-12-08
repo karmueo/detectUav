@@ -105,9 +105,21 @@ AclLiteError DataOutputThread::Process(int msgId, shared_ptr<void> data)
     switch (msgId)
     {
     case MSG_OUTPUT_FRAME:
-        RecordQueue(static_pointer_cast<DetectDataMsg>(data));
-        DataProcess();
+    {
+        shared_ptr<DetectDataMsg> detectDataMsg =
+            static_pointer_cast<DetectDataMsg>(data);
+        if (detectDataMsg->decimatedFrame && detectDataMsg->reusePrevResult)
+        {
+            ApplyCachedResult(detectDataMsg);
+            ProcessOutput(detectDataMsg);
+        }
+        else
+        {
+            RecordQueue(detectDataMsg);
+            DataProcess();
+        }
         break;
+    }
     case MSG_ENCODE_FINISH:
         shutdown_++;
         if (shutdown_ == postNum_)
@@ -320,7 +332,40 @@ DataOutputThread::ProcessOutput(shared_ptr<DetectDataMsg> detectDataMsg)
         }
     }
 
+    UpdateCachedResult(detectDataMsg);
+
     return ACLLITE_OK;
+}
+
+void DataOutputThread::UpdateCachedResult(
+    const shared_ptr<DetectDataMsg> &detectDataMsg)
+{
+    CachedResult &cache = lastResults_[detectDataMsg->channelId];
+    cache.detections = detectDataMsg->detections;
+    cache.trackingResult = detectDataMsg->trackingResult;
+    cache.textPrint = detectDataMsg->textPrint;
+    cache.trackingActive = detectDataMsg->trackingActive;
+    cache.trackingConfidence = detectDataMsg->trackingConfidence;
+}
+
+void DataOutputThread::ApplyCachedResult(
+    shared_ptr<DetectDataMsg> &detectDataMsg)
+{
+    auto it = lastResults_.find(detectDataMsg->channelId);
+    if (it == lastResults_.end())
+    {
+        return;
+    }
+
+    const CachedResult &cache = it->second;
+    detectDataMsg->detections = cache.detections;
+    detectDataMsg->trackingResult = cache.trackingResult;
+    detectDataMsg->textPrint = cache.textPrint;
+    detectDataMsg->trackingActive = cache.trackingActive;
+    detectDataMsg->trackingConfidence = cache.trackingConfidence;
+    detectDataMsg->hasTracking = cache.trackingResult.isTracked;
+    detectDataMsg->trackScore = cache.trackingResult.curScore;
+    detectDataMsg->trackInitScore = cache.trackingResult.initScore;
 }
 
 AclLiteError

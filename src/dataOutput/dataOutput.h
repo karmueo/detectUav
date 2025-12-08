@@ -60,6 +60,7 @@ class DataOutputThread : public AclLiteThread
     AclLiteError SendCVImshow(std::shared_ptr<DetectDataMsg> &detectDataMsg);
     AclLiteError DisplayMsgSend(std::shared_ptr<DetectDataMsg> detectDataMsg);
     AclLiteError SendImageToRtsp(std::shared_ptr<DetectDataMsg> &detectDataMsg);
+    AclLiteError SendImageToHdmi(std::shared_ptr<DetectDataMsg> &detectDataMsg);
     void         UpdateCachedResult(
                 const std::shared_ptr<DetectDataMsg> &detectDataMsg);
     void ApplyCachedResult(std::shared_ptr<DetectDataMsg> &detectDataMsg);

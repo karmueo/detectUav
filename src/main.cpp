@@ -29,6 +29,7 @@
 #include "detectPreprocess/detectPreprocess.h"
 #include "tracking/tracking.h"
 #include "pushrtsp/pushrtspthread.h"
+#include "hdmiOutput/hdmiOutputThread.h"
 #include <cstdlib>
 #include <dirent.h>
 #include <fstream>
@@ -346,7 +347,8 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                                             kPostNum,
                                             kBatch,
                                             kFramesPerSecond,
-                                            channelFrameDecimation);
+                                            channelFrameDecimation,
+                                            outputType);
                     dataInputParam.threadInstName.assign(dataInputName.c_str());
                     dataInputParam.context = context;
                     dataInputParam.runMode = runMode;
@@ -470,6 +472,17 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                         rtspDisplayThreadParam.runMode = runMode;
                         rtspDisplayThreadParam.queueSize = 1000;  // 增大队列避免积压
                         threadTbl.push_back(rtspDisplayThreadParam);
+                    }
+                    else if (outputType == "hdmi")
+                    {
+                        AclLiteThreadParam hdmiDisplayParam;
+                        hdmiDisplayParam.threadInst = new HdmiOutputThread(runMode, vencConfig);
+                        hdmiDisplayParam.threadInstName.assign(
+                            (kHdmiDisplayName + to_string(channelId)).c_str());
+                        hdmiDisplayParam.context = context;
+                        hdmiDisplayParam.runMode = runMode;
+                        hdmiDisplayParam.queueSize = 20;
+                        threadTbl.push_back(hdmiDisplayParam);
                     }
                     kExitCount++;
                 }

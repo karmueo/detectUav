@@ -31,16 +31,18 @@ const uint32_t kOneMSec = 1000;
 } // namespace
 using namespace std;
 
-DataInputThread::DataInputThread(int32_t       deviceId,
-                                 int32_t       channelId,
-                                 aclrtRunMode &runMode,
-                                 string        inputDataType,
-                                 string        inputDataPath,
-                                 string        inferName,
-                                 int           postThreadNum,
-                                 uint32_t      batch,
-                                 int           framesPerSecond,
-                                 int           frameSkip)
+DataInputThread::DataInputThread(
+    int32_t       deviceId,
+    int32_t       channelId,
+    aclrtRunMode &runMode,
+    string        inputDataType,
+    string        inputDataPath,
+    string        inferName,
+    int           postThreadNum,
+    uint32_t      batch,
+    int           framesPerSecond,
+    int           frameSkip,
+    string        outputType)
     : deviceId_(deviceId),
       channelId_(channelId),
       frameCnt_(0),
@@ -51,6 +53,7 @@ DataInputThread::DataInputThread(int32_t       deviceId,
       inputDataType_(inputDataType),
       inputDataPath_(inputDataPath),
       inferName_(inferName),
+      outputType_(outputType),
       postThreadNum_(postThreadNum),
       postproId_(0),
       runMode_(runMode),
@@ -61,14 +64,17 @@ DataInputThread::DataInputThread(int32_t       deviceId,
       postThreadId_(postThreadNum, INVALID_INSTANCE_ID),
       dataOutputThreadId_(INVALID_INSTANCE_ID),
       rtspDisplayThreadId_(INVALID_INSTANCE_ID),
+      hdmiDisplayThreadId_(INVALID_INSTANCE_ID),
       framesPerSecond_(framesPerSecond),
-    frameSkip_(frameSkip < 0 ? 0 : frameSkip),  // 跳帧参数: 跳过 frameSkip_ 帧; 0 = 不跳帧
+      frameSkip_(
+          frameSkip < 0
+              ? 0
+              : frameSkip), // 跳帧参数: 跳过 frameSkip_ 帧; 0 = 不跳帧
       trackThreadId_(INVALID_INSTANCE_ID),
       isTrackingActive_(false),
       currentTrackingConfidence_(0.0f),
-    isFirstFrame_(true)
-    , lastIsTrackingMode_(false)
-    , lastTrackingLostTime_(0)
+      isFirstFrame_(true),
+      lastTrackingLostTime_(0)
 {
 }
 
@@ -167,6 +173,16 @@ AclLiteError DataInputThread::Init()
         GetAclLiteThreadIdByName(kDataOutputName + to_string(channelId_));
     rtspDisplayThreadId_ =
         GetAclLiteThreadIdByName(kRtspDisplayName + to_string(channelId_));
+    if (outputType_ == "hdmi")
+    {
+        hdmiDisplayThreadId_ =
+            GetAclLiteThreadIdByName(kHdmiDisplayName + to_string(channelId_));
+        if (hdmiDisplayThreadId_ == INVALID_INSTANCE_ID)
+        {
+            ACLLITE_LOG_ERROR("hdmi display instance id %d", hdmiDisplayThreadId_);
+            return ACLLITE_ERROR;
+        }
+    }
     trackThreadId_ =
         GetAclLiteThreadIdByName(kTrackName + to_string(channelId_));
     for (int i = 0; i < postThreadNum_; i++)
@@ -232,7 +248,6 @@ AclLiteError DataInputThread::Process(int msgId, shared_ptr<void> msgData)
                     // 当tracking激活时，允许在后续帧跳过推理（进入TRACK_ONLY模式）
                     if (trackStateMsg->trackingActive) {
                         isFirstFrame_ = false;
-                        ACLLITE_LOG_INFO("[DataInput Ch%d] Tracking activated (conf=%.3f), ready to skip inference", channelId_, currentTrackingConfidence_);
                     }
                 
                 if (trackStateMsg->needRedetection)
@@ -468,6 +483,7 @@ AclLiteError DataInputThread::MsgRead(shared_ptr<DetectDataMsg> &detectDataMsg)
     detectDataMsg->postId = postproId_;
     detectDataMsg->dataOutputThreadId = dataOutputThreadId_;
     detectDataMsg->rtspDisplayThreadId = rtspDisplayThreadId_;
+    detectDataMsg->hdmiDisplayThreadId = hdmiDisplayThreadId_;
     // Set track thread instance id (if configured, otherwise INVALID_INSTANCE_ID)
     detectDataMsg->trackThreadId = GetAclLiteThreadIdByName(kTrackName + to_string(channelId_));
     detectDataMsg->dataInputThreadId = selfThreadId_;
@@ -578,13 +594,6 @@ AclLiteError DataInputThread::MsgSend(shared_ptr<DetectDataMsg> &detectDataMsg)
                     return ret;
                 }
             }
-            
-            if (!lastIsTrackingMode_)
-            {
-                ACLLITE_LOG_INFO("[DataInput Ch%d Frame%d] TRACKING_ONLY mode (skip inference, conf=%.3f)",
-                                 channelId_, detectDataMsg->msgNum, currentTrackingConfidence_);
-            }
-            lastIsTrackingMode_ = true;
         }
         else
         {
@@ -611,12 +620,6 @@ AclLiteError DataInputThread::MsgSend(shared_ptr<DetectDataMsg> &detectDataMsg)
                 }
             }
             
-            if (lastIsTrackingMode_)
-            {
-                ACLLITE_LOG_INFO("[DataInput Ch%d Frame%d] DETECTION mode (full inference pipeline)",
-                                 channelId_, detectDataMsg->msgNum);
-            }
-            lastIsTrackingMode_ = false;
         }
 
         ret = SendMessage(selfThreadId_, MSG_READ_FRAME, nullptr);

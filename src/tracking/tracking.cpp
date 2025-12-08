@@ -226,8 +226,6 @@ AclLiteError Tracking::Process(int msgId, std::shared_ptr<void> data)
                         detectDataMsg->trackInitScore = best.score;
                         detectDataMsg->trackScore = best.score;
                         
-                        ACLLITE_LOG_INFO("[Tracking Ch%d] Initialized with score=%.3f",
-                                         detectDataMsg->channelId, best.score);
                         // 通知DataInput跟踪已激活，DataInput可以进入TRACK_ONLY模式
                         SendTrackingStateFeedback(detectDataMsg);
                     }

@@ -39,7 +39,8 @@ class DataInputThread : public AclLiteThread
                     int           postThreadNum,
                     uint32_t      batch,
                     int           framesPerSecond,
-            int           frameSkip = 0);
+                    int           frameSkip = 0,
+                    std::string   outputType = "");
 
     ~DataInputThread();
     AclLiteError Init();
@@ -67,6 +68,7 @@ class DataInputThread : public AclLiteThread
     std::string inputDataType_;
     std::string inputDataPath_;
     std::string inferName_;
+    std::string outputType_;
     int         postThreadNum_;
     int         postproId_;
 
@@ -80,6 +82,7 @@ class DataInputThread : public AclLiteThread
     std::vector<int>         postThreadId_;
     int                      dataOutputThreadId_;
     int                      rtspDisplayThreadId_;
+    int                      hdmiDisplayThreadId_;
     std::vector<std::string> fileVec_;
 
     int64_t lastDecodeTime_;
@@ -93,7 +96,6 @@ class DataInputThread : public AclLiteThread
     bool    isTrackingActive_;           // 当前跟踪是否活跃
     float   currentTrackingConfidence_;  // 当前跟踪置信度
     bool    isFirstFrame_;               // 是否是第一帧(首帧必须进行检测)
-    bool    lastIsTrackingMode_;          // 用于记录上一次是否在跟踪模式, 仅在状态切换时打印日志
     int64_t lastTrackingLostTime_;       // 上次跟踪丢失时间戳(微秒), 用于防止重复处理
 };
 

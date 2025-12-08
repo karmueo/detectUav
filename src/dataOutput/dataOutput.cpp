@@ -73,8 +73,8 @@ AclLiteError DataOutputThread::SetOutputVideo()
 
 AclLiteError DataOutputThread::Init()
 {
-    // 初始化 dvpp 仅在 RTSP 输出时需要（用于YUV Resize）
-    if (outputDataType_ == "rtsp") {
+    // 初始化 dvpp 仅在 RTSP/HDMI 输出时需要（用于YUV Resize）
+    if (outputDataType_ == "rtsp" || outputDataType_ == "hdmi") {
         AclLiteError dvppRet = dvpp_.Init("DVPP_CHNMODE_VPC");
         if (dvppRet != ACLLITE_OK) {
             ACLLITE_LOG_ERROR("DataOutput dvpp init failed, error %d", dvppRet);
@@ -157,7 +157,7 @@ AclLiteError DataOutputThread::ShutDownProcess()
             // processed one item
         }
     }
-    if (outputDataType_ != "rtsp")
+    if (outputDataType_ != "rtsp" && outputDataType_ != "hdmi")
     {
         SendMessage(g_MainThreadId, MSG_APP_EXIT, nullptr);
     }
@@ -331,6 +331,15 @@ DataOutputThread::ProcessOutput(shared_ptr<DetectDataMsg> detectDataMsg)
             return ACLLITE_ERROR;
         }
     }
+    else if (outputDataType_ == "hdmi")
+    {
+        ret = SendImageToHdmi(detectDataMsg);
+        if (ret != ACLLITE_OK)
+        {
+            ACLLITE_LOG_ERROR("Send image to hdmi failed, error %d", ret);
+            return ACLLITE_ERROR;
+        }
+    }
 
     UpdateCachedResult(detectDataMsg);
 
@@ -476,6 +485,12 @@ DataOutputThread::DisplayMsgSend(shared_ptr<DetectDataMsg> detectDataMsg)
                               MSG_RTSP_DISPLAY,
                               detectDataMsg);
         }
+        else if (outputDataType_ == "hdmi")
+        {
+            ret = SendMessage(detectDataMsg->hdmiDisplayThreadId,
+                              MSG_HDMI_DISPLAY,
+                              detectDataMsg);
+        }
         if (ret == ACLLITE_ERROR_ENQUEUE)
         {
             retryCount++;
@@ -539,6 +554,33 @@ DataOutputThread::SendImageToRtsp(shared_ptr<DetectDataMsg> &detectDataMsg)
     if (ret != ACLLITE_OK)
     {
         ACLLITE_LOG_ERROR("Send display msg failed");
+        return ACLLITE_ERROR;
+    }
+
+    return ACLLITE_OK;
+}
+
+AclLiteError
+DataOutputThread::SendImageToHdmi(shared_ptr<DetectDataMsg> &detectDataMsg)
+{
+    // 调整尺寸到HDMI输出分辨率（NV12）
+    for (int i = 0; i < detectDataMsg->decodedImg.size(); i++) {
+        ImageData &srcImg = detectDataMsg->decodedImg[i];
+        if (srcImg.width != g_vencConfig.outputWidth || srcImg.height != g_vencConfig.outputHeight) {
+            ImageData resizedImg;
+            AclLiteError ret = dvpp_.Resize(resizedImg, srcImg, g_vencConfig.outputWidth, g_vencConfig.outputHeight);
+            if (ret != ACLLITE_OK) {
+                ACLLITE_LOG_ERROR("Dvpp resize in DataOutput (hdmi) failed, error %d", ret);
+                return ACLLITE_ERROR;
+            }
+            detectDataMsg->decodedImg[i] = resizedImg;
+        }
+    }
+
+    AclLiteError ret = DisplayMsgSend(detectDataMsg);
+    if (ret != ACLLITE_OK)
+    {
+        ACLLITE_LOG_ERROR("Send display msg to hdmi failed");
         return ACLLITE_ERROR;
     }
 

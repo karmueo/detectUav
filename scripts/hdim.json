@@ -1,0 +1,34 @@
+{
+    "device_config":[
+        {
+            "device_id":0,
+            "model_config":[
+                {
+                    "model_path":"./model/yolov11n_110_rgb_640_raw_v0_bs1.om",
+                    "model_width":640,
+                    "model_heigth":640,
+                    "model_batch": 1,
+                    "frame_decimation": 0,
+                    "track_config":{
+                        "enable_tracking": true,
+                        "track_model_path":"./model/mixformerv2_online_small_bs1.om"
+                    },
+                    "io_info":[
+                        {
+                            "input_path":"rtsp://192.168.1.80:8554/uav2.264",
+                            "input_type":"rtsp",
+                            "output_path": "hdmi0",
+                            "output_type": "hdmi",
+                            "channel_id":0,
+                            "rtsp_config": {
+                                "output_width": 1920,
+                                "output_height": 1080,
+                                "output_fps": 20
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

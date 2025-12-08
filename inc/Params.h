@@ -23,6 +23,7 @@
 #include "AclLiteImageProc.h"
 #include "AclLiteModel.h"
 #include "AclLiteType.h"
+#include "AclLiteThread.h"
 // Lightweight detection box for cross-thread messaging
 struct DetectionOBB {
     float x0;
@@ -67,6 +68,7 @@ const int MSG_INFER_DONE = 10;
 const int MSG_TRACK_DATA = 11; // detection -> tracker
 const int MSG_TRACK_ONLY = 12; // dataInput -> tracker (tracking only, no detection)
 const int MSG_TRACK_STATE_CHANGE = 13; // tracker -> dataInput (tracking state feedback)
+const int MSG_HDMI_DISPLAY = 14; // dataOutput -> hdmi display
 
 const std::string kDataInputName = "dataInput";
 const std::string kPreName = "detectPre";
@@ -74,6 +76,7 @@ const std::string kInferName = "detectInfer";
 const std::string kPostName = "detectPost";
 const std::string kDataOutputName = "dataOutput";
 const std::string kRtspDisplayName = "rtspDisplay";
+const std::string kHdmiDisplayName = "hdmiDisplay";
 const std::string kTrackName = "track";
 } // namespace
 
@@ -84,6 +87,7 @@ struct DetectDataMsg
     int      detectPostThreadId;
     int      dataOutputThreadId;
     int      rtspDisplayThreadId;
+    int      hdmiDisplayThreadId = INVALID_INSTANCE_ID;
     int      trackThreadId = INVALID_INSTANCE_ID;      // tracking thread id (optional, -1 if unused)
     int      dataInputThreadId;  // data input thread id for flow control
     int      postId;

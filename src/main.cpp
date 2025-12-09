@@ -30,11 +30,13 @@
 #include "tracking/tracking.h"
 #include "pushrtsp/pushrtspthread.h"
 #include "hdmiOutput/hdmiOutputThread.h"
+#include <algorithm>
 #include <cstdlib>
 #include <dirent.h>
 #include <fstream>
 #include <iostream>
 #include <json/json.h>
+#include <sstream>
 
 using namespace std;
 namespace
@@ -47,7 +49,130 @@ int                  kPostNum = 1;
 int                  kFramesPerSecond = 1000;
 uint32_t             kMsgQueueSize = 3;
 uint32_t             argNum = 2;
+const char *         kMachineIdPath = "/etc/machine-id";
+const char *         kMachineIdPathLegacy = "/var/lib/dbus/machine-id";
+const char *         kProductUuidPath = "/sys/class/dmi/id/product_uuid";
+const bool           kHardwareLockEnabled = true;
+const vector<string> kAllowedMachineIds = {
+    "6bbe7deec6554ff29c2754800b886653"};
+const vector<string> kAllowedFingerprints = {"daff6a71774a66c0"};
 } // namespace
+
+struct HardwareFingerprint
+{
+    string machine_id;
+    string product_uuid;
+    string fingerprint;
+};
+
+string TrimString(const string &value)
+{
+    const string whitespace = " \t\n\r";
+    size_t       start = value.find_first_not_of(whitespace);
+    if (start == string::npos)
+    {
+        return "";
+    }
+    size_t end = value.find_last_not_of(whitespace);
+    return value.substr(start, end - start + 1);
+}
+
+string ReadFirstLine(const string &path)
+{
+    ifstream file(path);
+    if (!file.is_open())
+    {
+        return "";
+    }
+    string line;
+    getline(file, line);
+    return TrimString(line);
+}
+
+uint64_t Fnv1aHash64(const string &data)
+{
+    const uint64_t kOffset = 14695981039346656037ULL;
+    const uint64_t kPrime = 1099511628211ULL;
+    uint64_t       hash = kOffset;
+    for (unsigned char c : data)
+    {
+        hash ^= static_cast<uint64_t>(c);
+        hash *= kPrime;
+    }
+    return hash;
+}
+
+string BuildFingerprintString(uint64_t hashValue)
+{
+    stringstream ss;
+    ss << hex << hashValue;
+    return ss.str();
+}
+
+HardwareFingerprint BuildHardwareFingerprint()
+{
+    HardwareFingerprint info;
+    info.machine_id = ReadFirstLine(kMachineIdPath);
+    if (info.machine_id.empty())
+    {
+        info.machine_id = ReadFirstLine(kMachineIdPathLegacy);
+    }
+    info.product_uuid = ReadFirstLine(kProductUuidPath);
+    string raw = info.machine_id + "|" + info.product_uuid;
+    info.fingerprint = BuildFingerprintString(Fnv1aHash64(raw));
+    return info;
+}
+
+bool ValidateHardwareLock()
+{
+    if (!kHardwareLockEnabled)
+    {
+        ACLLITE_LOG_INFO("Hardware lock disabled at build time");
+        return true;
+    }
+
+    if (kAllowedMachineIds.empty() && kAllowedFingerprints.empty())
+    {
+        ACLLITE_LOG_ERROR(
+            "Hardware lock enabled but no allowlist compiled in");
+        return false;
+    }
+
+    HardwareFingerprint current = BuildHardwareFingerprint();
+    if (current.machine_id.empty() && current.product_uuid.empty())
+    {
+        ACLLITE_LOG_ERROR(
+            "Hardware lock enabled but failed to read machine identifiers");
+        return false;
+    }
+
+    ACLLITE_LOG_INFO(
+        "Hardware fingerprint=%s (machine-id=%s, product-uuid=%s)",
+        current.fingerprint.c_str(),
+        current.machine_id.c_str(),
+        current.product_uuid.c_str());
+
+    auto matchValue = [](const vector<string> &values, const string &target) {
+        return find(values.begin(), values.end(), target) != values.end();
+    };
+
+    if (!current.machine_id.empty() && matchValue(kAllowedMachineIds, current.machine_id))
+    {
+        return true;
+    }
+    if (!current.fingerprint.empty() &&
+        matchValue(kAllowedFingerprints, current.fingerprint))
+    {
+        return true;
+    }
+
+    ACLLITE_LOG_ERROR(
+        "Hardware lock rejected. Current machine-id=%s, fingerprint=%s not "
+        "in compiled allowlist",
+        current.machine_id.c_str(),
+        current.fingerprint.c_str());
+    return false;
+}
 
 int MainThreadProcess(uint32_t msgId, shared_ptr<void> msgData, void *userData)
 {
@@ -596,6 +721,10 @@ int main(int argc, char *argv[])
         return ACLLITE_ERROR;
     }
     kJsonFile = string(argv[1]);
+    if (!ValidateHardwareLock())
+    {
+        return ACLLITE_ERROR;
+    }
     AclLiteResource aclDev = AclLiteResource();
     AclLiteError    ret = aclDev.Init();
     if (ret != ACLLITE_OK)

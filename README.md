@@ -2,6 +2,8 @@
 
 基于 Ascend ACL 的无人机检测与单目标跟踪管线。加载检测模型和可选跟踪模型，拉取 RTSP 等输入并将标注后的 H.264 通过 RTSP 推流输出。
 
+> 硬件绑定：允许的 `/etc/machine-id` 与指纹（machine-id + product_uuid 的 FNV-1a 64 位哈希，16 进制表示）在 `src/main.cpp` 内编译固定，未命中时程序直接退出。启动时日志会打印 `Hardware fingerprint=...`，如需更换机器请调整文件中的 `kAllowedMachineIds`/`kAllowedFingerprints` 常量并重新编译。
+
 ## 构建与运行
 1. 安装 Ascend 驱动/工具链，设置 `SYSROOT`、`DDK_PATH`、`NPU_HOST_LIB`（缺省 `/usr/local/Ascend/ascend-toolkit/latest`）。若需要 RTSP 推流，确保 FFmpeg/OpenCV 与 live555 可用。
 2. 配置并编译（Ninja 示例）：

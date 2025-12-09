@@ -4,7 +4,7 @@
             "device_id":0,
             "model_config":[
                 {
-                    "model_path":"./model/yolov11n_110_rgb_640_raw_v0_bs1.om",
+                    "model_path":"/root/work/AntiUav/model/yolov11n_110_rgb_640_raw_v0_bs1.om",
                     "model_width":640,
                     "model_heigth":640,
                     "model_batch": 1,
@@ -12,7 +12,7 @@
                     "target_class_id": 1,
                     "track_config":{
                         "enable_tracking": true,
-                        "track_model_path":"./model/mixformerv2_online_small_bs1.om"
+                        "track_model_path":"/root/work/AntiUav/model/mixformerv2_online_small_bs1.om"
                     },
                     "io_info":[
                         {

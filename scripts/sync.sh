@@ -10,7 +10,7 @@ SOURCE_TEST_MIXFORMER="./build/src/out/test_mixformerv2_om"
 SOURCE_TEST_HDMI_OUTPUT="./build/src/out/test_hdmi_output"
 REMOTE_USER="root"
 REMOTE_HOST="192.168.1.111"
-REMOTE_PATH="/root/work/yolov11_cann_video"
+REMOTE_PATH="/root/work/AntiUav"
 
 # 检查源文件是否存在
 if [ ! -f "$SOURCE_FILE" ]; then

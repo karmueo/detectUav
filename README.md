@@ -15,6 +15,43 @@
    ./src/out/main ../scripts/test.json
    ```
 
+## 以 systemd 服务方式运行
+1. 确保可执行文件已在 `build/src/out/main`，并使用绝对路径引用 JSON（避免切换目录导致的相对路径问题）。
+2. 创建服务文件 `/etc/systemd/system/detectuav.service`（需 sudo）：
+   ```ini
+    [Unit]
+    Description=detectUav inference pipeline
+
+    [Service]
+    Type=simple
+    User=root
+    Group=root
+    WorkingDirectory=/root/work/AntiUav/
+    ExecStart=/bin/bash -lc '\
+      source /usr/local/Ascend/ascend-toolkit/set_env.sh && \
+      echo "[systemd] detectUav starting" >&2 && \
+      exec /usr/bin/stdbuf -oL -eL \
+        /root/work/AntiUav/main \
+        /root/work/AntiUav/scripts/config.json \
+        >>/var/log/detectuav.log 2>&1'
+    Restart=always
+    RestartSec=5
+
+    [Install]
+    WantedBy=multi-user.target
+   ```
+3. 重载并启用服务：
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now detectuav.service
+   ```
+4. 查看运行状态与日志：
+   ```bash
+   systemctl status detectuav.service
+   cat /var/log/detectuav.log
+   ```
+   如需更新配置或二进制，替换文件后执行 `sudo systemctl restart detectuav.service`。
+
 ## JSON 配置说明
 程序通过 JSON 描述设备、模型与 IO。样例见 `scripts/config.json`、`scripts/hk_rtsp.json`、`scripts/test.json`。
 

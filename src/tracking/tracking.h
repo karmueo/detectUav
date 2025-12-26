@@ -139,6 +139,30 @@ class Tracking : public AclLiteThread
     void setMaxTrackLossFrames(int maxFrames);
 
     /**
+     * @brief 是否启用可疑静止目标过滤
+     * @param enabled 输入：true 启用，false 关闭
+     */
+    void setStaticTargetFilterEnabled(bool enabled);
+
+    /**
+     * @brief 设置中心点判定阈值（像素）
+     * @param threshold 输入：阈值（像素）
+     */
+    void setStaticCenterThreshold(float threshold);
+
+    /**
+     * @brief 设置尺寸判定阈值（像素）
+     * @param threshold 输入：阈值（像素）
+     */
+    void setStaticSizeThreshold(float threshold);
+
+    /**
+     * @brief 设置静止判定连续帧数
+     * @param frames 输入：连续帧数
+     */
+    void setStaticFrameThreshold(int frames);
+
+    /**
      * @brief 设置模板输入数据
      * @param data 输入：数据指针
      * @param size 输入：数据大小（元素个数）
@@ -246,6 +270,10 @@ class Tracking : public AclLiteThread
      */
     void clip_box(DrBBox &box, int img_h, int img_w, int border);
 
+    bool IsBlockedDetection(const DetectionOBB &det) const;
+    bool UpdateStaticTrackingState(const DrBBox &box);
+    void FillStaticFilterState(std::shared_ptr<DetectDataMsg> &msg) const;
+
     /// 输入缓冲区大小（元素数，非字节）
     size_t input_template_size;        ///< 模板输入缓冲区大小
     size_t input_online_template_size; ///< 在线模板输入缓冲区大小
@@ -293,6 +321,17 @@ class Tracking : public AclLiteThread
     int          max_track_loss_frames_ = 10;             ///< 连续丢失帧数阈值
     int          track_loss_count_ = 0;                   ///< 当前连续丢失帧数
     float        current_tracking_confidence_ = 0.0f;     ///< 当前跟踪置信度
+
+    /// ============ 可疑静止目标过滤 ============
+    bool   filter_static_target_ = false;     ///< 是否启用静止目标过滤
+    float  static_center_threshold_ = 2.0f;   ///< 中心点变化阈值（像素）
+    float  static_size_threshold_ = 2.0f;     ///< 尺寸变化阈值（像素）
+    int    static_frame_threshold_ = 30;      ///< 连续静止帧数阈值
+    int    static_frame_count_ = 0;           ///< 当前连续静止帧计数
+    bool   has_last_box_ = false;             ///< 是否已有上一帧框
+    DrBBox last_box_ = {0, 0, 0, 0, 0, 0, 0, 0};
+    bool   has_blocked_target_ = false;       ///< 是否存在已阻断目标
+    DrBBox blocked_target_ = {0, 0, 0, 0, 0, 0, 0, 0};
 };
 
 #endif // TRACKING_H

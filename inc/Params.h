@@ -116,6 +116,15 @@ struct DetectDataMsg
     bool   skipInference = false;          // 是否跳过检测推理
     float  trackingConfidence = 0.0f;      // 当前跟踪置信度
     bool   needRedetection = false;        // 是否需要重新检测(跟踪失败时置为true)
+    // ============ 可疑静止目标过滤状态 ============
+    bool   filterStaticTargetEnabled = false; // 是否启用静止目标过滤
+    bool   hasBlockedTarget = false;          // 是否存在被阻断目标
+    float  blockedCenterX = 0.0f;             // 被阻断目标中心x
+    float  blockedCenterY = 0.0f;             // 被阻断目标中心y
+    float  blockedWidth = 0.0f;               // 被阻断目标宽
+    float  blockedHeight = 0.0f;              // 被阻断目标高
+    float  staticCenterThreshold = 0.0f;      // 中心阈值（像素）
+    float  staticSizeThreshold = 0.0f;        // 尺寸阈值（像素）
     // ============ 跳帧复用 ============
     bool   decimatedFrame = false;         // 是否为跳帧(仅做轻量处理)
     bool   reusePrevResult = false;        // 是否复用上一帧的检测/跟踪结果

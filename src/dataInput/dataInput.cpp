@@ -74,7 +74,15 @@ DataInputThread::DataInputThread(
       isTrackingActive_(false),
       currentTrackingConfidence_(0.0f),
       isFirstFrame_(true),
-      lastTrackingLostTime_(0)
+      lastTrackingLostTime_(0),
+      filterStaticTargetEnabled_(false),
+      hasBlockedTarget_(false),
+      blockedCenterX_(0.0f),
+      blockedCenterY_(0.0f),
+      blockedWidth_(0.0f),
+      blockedHeight_(0.0f),
+      staticCenterThreshold_(0.0f),
+      staticSizeThreshold_(0.0f)
 {
 }
 
@@ -245,6 +253,14 @@ AclLiteError DataInputThread::Process(int msgId, shared_ptr<void> msgData)
             {
                 isTrackingActive_ = trackStateMsg->trackingActive;
                 currentTrackingConfidence_ = trackStateMsg->trackingConfidence;
+                filterStaticTargetEnabled_ = trackStateMsg->filterStaticTargetEnabled;
+                hasBlockedTarget_ = trackStateMsg->hasBlockedTarget;
+                blockedCenterX_ = trackStateMsg->blockedCenterX;
+                blockedCenterY_ = trackStateMsg->blockedCenterY;
+                blockedWidth_ = trackStateMsg->blockedWidth;
+                blockedHeight_ = trackStateMsg->blockedHeight;
+                staticCenterThreshold_ = trackStateMsg->staticCenterThreshold;
+                staticSizeThreshold_ = trackStateMsg->staticSizeThreshold;
                     // 当tracking激活时，允许在后续帧跳过推理（进入TRACK_ONLY模式）
                     if (trackStateMsg->trackingActive) {
                         isFirstFrame_ = false;
@@ -496,6 +512,14 @@ AclLiteError DataInputThread::MsgRead(shared_ptr<DetectDataMsg> &detectDataMsg)
     detectDataMsg->trackingConfidence = currentTrackingConfidence_;
     detectDataMsg->skipInference = isTrackingActive_ && !isFirstFrame_;
     detectDataMsg->needRedetection = false;
+    detectDataMsg->filterStaticTargetEnabled = filterStaticTargetEnabled_;
+    detectDataMsg->hasBlockedTarget = hasBlockedTarget_;
+    detectDataMsg->blockedCenterX = blockedCenterX_;
+    detectDataMsg->blockedCenterY = blockedCenterY_;
+    detectDataMsg->blockedWidth = blockedWidth_;
+    detectDataMsg->blockedHeight = blockedHeight_;
+    detectDataMsg->staticCenterThreshold = staticCenterThreshold_;
+    detectDataMsg->staticSizeThreshold = staticSizeThreshold_;
     detectDataMsg->decimatedFrame =
         frameSkip_ > 0 && (detectDataMsg->msgNum % (frameSkip_ + 1) != 0);
     detectDataMsg->reusePrevResult = detectDataMsg->decimatedFrame;

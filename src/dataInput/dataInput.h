@@ -97,6 +97,14 @@ class DataInputThread : public AclLiteThread
     float   currentTrackingConfidence_;  // 当前跟踪置信度
     bool    isFirstFrame_;               // 是否是第一帧(首帧必须进行检测)
     int64_t lastTrackingLostTime_;       // 上次跟踪丢失时间戳(微秒), 用于防止重复处理
+    bool    filterStaticTargetEnabled_;  // 是否启用静止目标过滤
+    bool    hasBlockedTarget_;           // 是否存在被阻断目标
+    float   blockedCenterX_;             // 被阻断目标中心x
+    float   blockedCenterY_;             // 被阻断目标中心y
+    float   blockedWidth_;               // 被阻断目标宽
+    float   blockedHeight_;              // 被阻断目标高
+    float   staticCenterThreshold_;      // 中心阈值（像素）
+    float   staticSizeThreshold_;        // 尺寸阈值（像素）
 };
 
 #endif

@@ -620,6 +620,32 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                                 trackingInst->setMaxScoreDecay(decay);
                                 ACLLITE_LOG_INFO("Set tracking score_decay_factor=%.2f for channel %d", decay, channelId);
                             }
+
+                            if (trackingConfig["filter_suspect_static_target"].type() != Json::nullValue)
+                            {
+                                bool enabled = trackingConfig["filter_suspect_static_target"].asBool();
+                                trackingInst->setStaticTargetFilterEnabled(enabled);
+                                ACLLITE_LOG_INFO("Set tracking filter_suspect_static_target=%s for channel %d",
+                                                 enabled ? "true" : "false", channelId);
+                            }
+                            if (trackingConfig["static_center_threshold"].type() != Json::nullValue)
+                            {
+                                float threshold = trackingConfig["static_center_threshold"].asFloat();
+                                trackingInst->setStaticCenterThreshold(threshold);
+                                ACLLITE_LOG_INFO("Set tracking static_center_threshold=%.2f for channel %d", threshold, channelId);
+                            }
+                            if (trackingConfig["static_size_threshold"].type() != Json::nullValue)
+                            {
+                                float threshold = trackingConfig["static_size_threshold"].asFloat();
+                                trackingInst->setStaticSizeThreshold(threshold);
+                                ACLLITE_LOG_INFO("Set tracking static_size_threshold=%.2f for channel %d", threshold, channelId);
+                            }
+                            if (trackingConfig["static_frame_threshold"].type() != Json::nullValue)
+                            {
+                                int threshold = trackingConfig["static_frame_threshold"].asInt();
+                                trackingInst->setStaticFrameThreshold(threshold);
+                                ACLLITE_LOG_INFO("Set tracking static_frame_threshold=%d for channel %d", threshold, channelId);
+                            }
                         }
                         
                         AclLiteThreadParam trackParam;

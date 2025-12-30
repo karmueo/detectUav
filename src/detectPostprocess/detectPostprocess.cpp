@@ -20,7 +20,6 @@ const vector<cv::Scalar> kColors{cv::Scalar(237, 149, 100),
                                  cv::Scalar(139, 85, 26)};
 const float              kConfThresh = 0.25f;
 const float              kNmsThresh = 0.45f;
-const uint32_t           kNumClasses = 2;
 typedef struct BoundBox
 {
     float  x;
@@ -33,6 +32,7 @@ typedef struct BoundBox
 } BoundBox;
 
 bool sortScore(BoundBox box1, BoundBox box2) { return box1.score > box2.score; }
+size_t GetLabelCount() { return sizeof(::label) / sizeof(::label[0]); }
 } // namespace
 
 DetectPostprocessThread::DetectPostprocessThread(uint32_t      modelWidth,
@@ -47,15 +47,7 @@ DetectPostprocessThread::DetectPostprocessThread(uint32_t      modelWidth,
       batch_(batch),
       targetClassId_(targetClassId)
 {
-    if (targetClassId_ >= 0 && targetClassId_ >= static_cast<int>(kNumClasses))
-    {
-        ACLLITE_LOG_WARNING(
-            "Configured target_class_id %d exceeds supported classes [%u), no "
-            "detections will pass the filter",
-            targetClassId_,
-            kNumClasses);
-    }
-    else if (targetClassId_ >= 0)
+    if (targetClassId_ >= 0)
     {
         ACLLITE_LOG_INFO("Enable target class filter: class_id=%d",
                          targetClassId_);
@@ -112,15 +104,56 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
     
     float *hostBuff = static_cast<float *>(hostAllBuffer);
     size_t floatsPerFrame = (detectDataMsg->inferenceOutput[0].size / batch_) / sizeof(float);
-    const uint32_t kNumChannels = 6; // cx, cy, w, h, conf_class0, conf_class1
-    uint32_t numPredictionsPerFrame = (floatsPerFrame > 0) ? floatsPerFrame / kNumChannels : 0;
+    uint32_t numChannels = 0;
+    if (detectDataMsg->hasDetectOutputDims &&
+        detectDataMsg->detectOutputDims.dimCount >= 2)
+    {
+        int64_t channelDim = detectDataMsg->detectOutputDims.dims[1];
+        if (channelDim > 0)
+        {
+            numChannels = static_cast<uint32_t>(channelDim);
+        }
+    }
+    if (numChannels == 0)
+    {
+        numChannels = static_cast<uint32_t>(4 + GetLabelCount());
+        static bool fallbackWarned = false;
+        if (!fallbackWarned)
+        {
+            ACLLITE_LOG_WARNING(
+                "Detect output dims unavailable, fallback to label-based channels %u",
+                numChannels);
+            fallbackWarned = true;
+        }
+    }
+    if (numChannels <= 4)
+    {
+        ACLLITE_LOG_ERROR("Invalid detect output channel count: %u",
+                          numChannels);
+        delete[] static_cast<uint8_t*>(hostAllBuffer);
+        return ACLLITE_ERROR;
+    }
+    uint32_t numClasses = numChannels - 4;
+    uint32_t numPredictionsPerFrame =
+        (floatsPerFrame > 0) ? floatsPerFrame / numChannels : 0;
+    if (!targetClassChecked_)
+    {
+        if (targetClassId_ >= 0 &&
+            targetClassId_ >= static_cast<int>(numClasses))
+        {
+            ACLLITE_LOG_WARNING(
+                "Configured target_class_id %d exceeds supported classes [%u), "
+                "no detections will pass the filter",
+                targetClassId_,
+                numClasses);
+        }
+        targetClassChecked_ = true;
+    }
+    size_t labelCount = GetLabelCount();
     
     for (size_t n = 0; n < detectDataMsg->decodedImg.size(); n++)
     {
         float *detectBuff = hostBuff + n * floatsPerFrame;
-
-        // YOLOv7 model output: [batch, 6, 8400]
-        // 6 channels: cx, cy, w, h, conf_class0, conf_class1
 
         // get srcImage width height
         int srcWidth = detectDataMsg->decodedImg[n].width;
@@ -152,22 +185,18 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
             float w = detectBuff[2 * numPredictionsPerFrame + i];
             float h = detectBuff[3 * numPredictionsPerFrame + i];
 
-            // Extract confidence scores for two classes
-            float conf0 = detectBuff[4 * numPredictionsPerFrame + i];
-            float conf1 = detectBuff[5 * numPredictionsPerFrame + i];
-
             // Select the class with higher confidence
-            float score;
-            uint32_t cls;
-            if (conf0 > conf1)
+            float score = detectBuff[4 * numPredictionsPerFrame + i];
+            uint32_t cls = 0;
+            for (uint32_t c = 1; c < numClasses; ++c)
             {
-                score = conf0;
-                cls = 0;
-            }
-            else
-            {
-                score = conf1;
-                cls = 1;
+                float conf =
+                    detectBuff[(4 + c) * numPredictionsPerFrame + i];
+                if (conf > score)
+                {
+                    score = conf;
+                    cls = c;
+                }
             }
 
             // Filter by confidence threshold
@@ -209,7 +238,7 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
             box.classIndex = cls;
             box.index = i;
             
-            if (cls < kNumClasses)
+            if (cls < numClasses)
             {
                 boxes.push_back(box);
             }
@@ -332,7 +361,11 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
             ss << std::fixed << std::setprecision(2) << result[i].score;
             std::string scoreStr = ss.str();
             
-            className = label[result[i].classIndex] + ":" + scoreStr;
+            std::string labelName =
+                (result[i].classIndex < labelCount) ?
+                label[result[i].classIndex] :
+                std::to_string(result[i].classIndex);
+            className = labelName + ":" + scoreStr;
             
             textMid = textMid + className + " ";
         }

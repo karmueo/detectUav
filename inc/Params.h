@@ -101,6 +101,8 @@ struct DetectDataMsg
     ImageData              modelInputImg; // image after detect preprocess
     std::vector<cv::Mat>   frame; // original image (BGR) needed by postprocess
     std::vector<InferenceOutput> inferenceOutput; // yolo detect output
+    bool                         hasDetectOutputDims = false;
+    aclmdlIODims                 detectOutputDims = {};
     std::vector<std::string>     textPrint;
     // structured detections (per frame index), single-image pipelines use index 0
     std::vector<DetectionOBB>    detections;

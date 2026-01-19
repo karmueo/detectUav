@@ -67,7 +67,7 @@ ChannelIdGenerator channelIdGenerator[DEVICE_MAX] = {};
 
 const int      kNoFlag = 0;                      // no flag
 const int      kInvalidVideoIndex = -1;          // invalid video index
-const string   kRtspTransport = "rtspTransport"; // rtsp transport
+const string   kRtspTransport = "rtsp_transport"; // rtsp transport
 const string   kUdp = "udp";                     // video format udp
 const string   kTcp = "tcp";
 const string   kBufferSize = "buffer_size";  // buffer size string

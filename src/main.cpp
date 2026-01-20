@@ -77,6 +77,68 @@ string TrimString(const string &value)
     return value.substr(start, end - start + 1);
 }
 
+/**
+ * ParseTargetClassIds 解析 target_class_id 配置，支持单值或数组。
+ * @param value JSON 值。
+ * @param scope 日志上下文信息，用于定位配置来源。
+ * @param target_class_ids 输出的类别列表，空表示不过滤。
+ * @return 是否解析成功，false 表示类型不支持。
+ */
+static bool ParseTargetClassIds(const Json::Value &value,
+                                const string &scope,
+                                vector<int> *target_class_ids)
+{
+    target_class_ids->clear();
+    if (value.type() == Json::nullValue)
+    {
+        return true;
+    }
+    if (value.isInt())
+    {
+        int class_id = value.asInt(); // 类别id
+        if (class_id < 0)
+        {
+            ACLLITE_LOG_WARNING(
+                "target_class_id is negative at %s, disabling class filter",
+                scope.c_str());
+            return true;
+        }
+        target_class_ids->push_back(class_id);
+        return true;
+    }
+    if (value.isArray())
+    {
+        for (Json::ArrayIndex idx = 0 /* 数组索引 */; idx < value.size();
+             ++idx)
+        {
+            const Json::Value &item = value[idx]; // 数组元素
+            if (!item.isInt())
+            {
+                ACLLITE_LOG_WARNING(
+                    "target_class_id has non-int item at %s[%u], ignoring",
+                    scope.c_str(),
+                    idx);
+                continue;
+            }
+            int class_id = item.asInt(); // 类别id
+            if (class_id < 0)
+            {
+                ACLLITE_LOG_WARNING(
+                    "target_class_id is negative at %s[%u], disabling class filter",
+                    scope.c_str(),
+                    idx);
+                target_class_ids->clear();
+                return true;
+            }
+            target_class_ids->push_back(class_id);
+        }
+        return true;
+    }
+    ACLLITE_LOG_WARNING("target_class_id type not supported at %s, ignoring",
+                        scope.c_str());
+    return false;
+}
+
 string ReadFirstLine(const string &path)
 {
     ifstream file(path);
@@ -265,7 +327,7 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                 // processing one frame (0 => no skip). Default is 0, and each
                 // io_info 可以单独覆盖。
                 int modelFrameDecimation = 0;
-                int modelTargetClassId = -1; // 默认不过滤类别
+                vector<int> model_target_class_ids; // 模型级过滤类别列表
                 if (root["device_config"][i]["model_config"][j]["frame_decimation"]
                         .type() != Json::nullValue)
                 {
@@ -281,14 +343,10 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                 if (root["device_config"][i]["model_config"][j]["target_class_id"]
                         .type() != Json::nullValue)
                 {
-                    modelTargetClassId = root["device_config"][i]["model_config"][j]
-                                                 ["target_class_id"]
-                                                     .asInt();
-                    if (modelTargetClassId < 0)
-                    {
-                        ACLLITE_LOG_WARNING("target_class_id is negative at model level, disabling class filter");
-                        modelTargetClassId = -1;
-                    }
+                    ParseTargetClassIds(
+                        root["device_config"][i]["model_config"][j]["target_class_id"],
+                        "model_config",
+                        &model_target_class_ids);
                 }
                 // Note: legacy field 'frame_skip' is no longer supported. Use 'frame_decimation'.
 
@@ -482,7 +540,7 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
 
                     // per-channel frame decimation override (defaults to model-level)
                     int channelFrameDecimation = modelFrameDecimation;
-                    int targetClassId = modelTargetClassId;
+                    vector<int> channel_target_class_ids = model_target_class_ids; // 通道级过滤类别列表
                     if (root["device_config"][i]["model_config"][j]["io_info"][k]["frame_decimation"]
                             .type() != Json::nullValue)
                     {
@@ -501,17 +559,10 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                     if (root["device_config"][i]["model_config"][j]["io_info"][k]["target_class_id"]
                             .type() != Json::nullValue)
                     {
-                        targetClassId =
-                            root["device_config"][i]["model_config"][j]["io_info"][k]
-                                ["target_class_id"]
-                                    .asInt();
-                        if (targetClassId < 0)
-                        {
-                            ACLLITE_LOG_WARNING(
-                                "io_info[%d] target_class_id is negative, disabling class filter for this channel",
-                                channelId);
-                            targetClassId = -1;
-                        }
+                        ParseTargetClassIds(
+                            root["device_config"][i]["model_config"][j]["io_info"][k]["target_class_id"],
+                            "io_info",
+                            &channel_target_class_ids);
                     }
 
                     // Create Thread for the input data:
@@ -548,8 +599,12 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                                           "_" + to_string(m);
                         AclLiteThreadParam detectPostParam;
                         detectPostParam.threadInst =
-                            new DetectPostprocessThread(
-                                modelWidth, modelHeigth, runMode, kBatch, targetClassId);
+                        new DetectPostprocessThread(
+                                modelWidth,
+                                modelHeigth,
+                                runMode,
+                                kBatch,
+                                channel_target_class_ids);
                         detectPostParam.threadInstName.assign(postName.c_str());
                         detectPostParam.context = context;
                         detectPostParam.runMode = runMode;

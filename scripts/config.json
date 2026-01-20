@@ -9,7 +9,7 @@
                     "model_heigth":640,
                     "model_batch": 1,
                     "frame_decimation": 0,
-                    "target_class_id": 1,
+                    "target_class_id": [0, 1],
                     "track_config": {
                         "enable_tracking": true,
                         "track_model_path": "/root/work/AntiUav/model/mixformerv2_online_small_bs1.om",

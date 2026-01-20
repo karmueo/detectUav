@@ -39,18 +39,31 @@ DetectPostprocessThread::DetectPostprocessThread(uint32_t      modelWidth,
                                                  uint32_t      modelHeight,
                                                  aclrtRunMode &runMode,
                                                  uint32_t      batch,
-                                                 int           targetClassId)
+                                                 const vector<int> &targetClassIds)
     : modelWidth_(modelWidth),
       modelHeight_(modelHeight),
       runMode_(runMode),
       sendLastBatch_(false),
       batch_(batch),
-      targetClassId_(targetClassId)
+      targetClassIds_(targetClassIds)
 {
-    if (targetClassId_ >= 0)
+    if (!targetClassIds_.empty())
     {
-        ACLLITE_LOG_INFO("Enable target class filter: class_id=%d",
-                         targetClassId_);
+        for (size_t i = 0 /* 索引 */; i < targetClassIds_.size(); ++i)
+        {
+            targetClassIdSet_.insert(targetClassIds_[i]);
+        }
+        stringstream ss; // 类别id列表字符串
+        for (size_t i = 0 /* 索引 */; i < targetClassIds_.size(); ++i)
+        {
+            if (i > 0)
+            {
+                ss << ",";
+            }
+            ss << targetClassIds_[i];
+        }
+        ACLLITE_LOG_INFO("Enable target class filter: class_ids=%s",
+                         ss.str().c_str());
     }
 }
 
@@ -138,14 +151,19 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
         (floatsPerFrame > 0) ? floatsPerFrame / numChannels : 0;
     if (!targetClassChecked_)
     {
-        if (targetClassId_ >= 0 &&
-            targetClassId_ >= static_cast<int>(numClasses))
+        if (!targetClassIds_.empty())
         {
-            ACLLITE_LOG_WARNING(
-                "Configured target_class_id %d exceeds supported classes [%u), "
-                "no detections will pass the filter",
-                targetClassId_,
-                numClasses);
+            for (size_t i = 0 /* 索引 */; i < targetClassIds_.size(); ++i)
+            {
+                if (targetClassIds_[i] >= static_cast<int>(numClasses))
+                {
+                    ACLLITE_LOG_WARNING(
+                        "Configured target_class_id %d exceeds supported classes [%u), "
+                        "detections with this id will be filtered out",
+                        targetClassIds_[i],
+                        numClasses);
+                }
+            }
         }
         targetClassChecked_ = true;
     }
@@ -204,8 +222,9 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
                 continue;
             
             // Optional class-id filtering from config
-            if (targetClassId_ >= 0 &&
-                cls != static_cast<uint32_t>(targetClassId_))
+            if (!targetClassIds_.empty() &&
+                targetClassIdSet_.find(static_cast<int>(cls)) ==
+                    targetClassIdSet_.end())
             {
                 continue;
             }

@@ -6,6 +6,8 @@
 #include "AclLiteImageProc.h"
 #include "AclLiteThread.h"
 #include "Params.h"
+#include <unordered_set>
+#include <vector>
 #include <unistd.h>
 
 class DetectPostprocessThread : public AclLiteThread
@@ -15,7 +17,7 @@ class DetectPostprocessThread : public AclLiteThread
                             uint32_t      modelHeight,
                             aclrtRunMode &runMode,
                             uint32_t      batch,
-                            int           targetClassId);
+                            const std::vector<int> &targetClassIds);
     ~DetectPostprocessThread();
 
     AclLiteError Init();
@@ -32,7 +34,8 @@ class DetectPostprocessThread : public AclLiteThread
     aclrtRunMode runMode_;
     bool         sendLastBatch_;
     uint32_t     batch_;
-    int          targetClassId_; // <0 means no class filtering
+    std::vector<int>      targetClassIds_; // 过滤类别列表，空表示不过滤
+    std::unordered_set<int> targetClassIdSet_; // 类别过滤集合，用于快速查找
     bool         targetClassChecked_ = false;
 };
 

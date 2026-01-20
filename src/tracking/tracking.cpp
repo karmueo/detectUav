@@ -9,6 +9,7 @@
 #include <vector>
 #include <sstream>
 #include <iomanip>
+#include <cmath>
 
 // Constants for normalization
 const float Tracking::mean_vals[3] = {
@@ -155,6 +156,14 @@ void Tracking::SendTrackingStateFeedback(std::shared_ptr<DetectDataMsg> detectDa
     feedbackMsg->trackingConfidence = detectDataMsg->trackingConfidence;
     feedbackMsg->needRedetection = detectDataMsg->needRedetection;
     feedbackMsg->channelId = detectDataMsg->channelId;
+    feedbackMsg->filterStaticTargetEnabled = filter_static_target_;
+    feedbackMsg->hasBlockedTarget = has_blocked_target_;
+    feedbackMsg->blockedCenterX = blocked_target_.cx;
+    feedbackMsg->blockedCenterY = blocked_target_.cy;
+    feedbackMsg->blockedWidth = blocked_target_.w;
+    feedbackMsg->blockedHeight = blocked_target_.h;
+    feedbackMsg->staticCenterThreshold = static_center_threshold_;
+    feedbackMsg->staticSizeThreshold = static_size_threshold_;
     
     AclLiteError ret = SendMessage(dataInputThreadId_, MSG_TRACK_STATE_CHANGE, feedbackMsg);
     if (ret != ACLLITE_OK)
@@ -162,6 +171,74 @@ void Tracking::SendTrackingStateFeedback(std::shared_ptr<DetectDataMsg> detectDa
         ACLLITE_LOG_WARNING("[Tracking Ch%d] Failed to send track state change to DataInput, error %d",
                             detectDataMsg->channelId, ret);
     }
+}
+
+bool Tracking::IsBlockedDetection(const DetectionOBB &det) const
+{
+    if (!has_blocked_target_)
+    {
+        return false;
+    }
+    float det_w = det.x1 - det.x0;
+    float det_h = det.y1 - det.y0;
+    float det_cx = (det.x0 + det.x1) * 0.5f;
+    float det_cy = (det.y0 + det.y1) * 0.5f;
+
+    bool center_match =
+        std::fabs(det_cx - blocked_target_.cx) <= static_center_threshold_ &&
+        std::fabs(det_cy - blocked_target_.cy) <= static_center_threshold_;
+    bool size_match =
+        std::fabs(det_w - blocked_target_.w) <= static_size_threshold_ &&
+        std::fabs(det_h - blocked_target_.h) <= static_size_threshold_;
+
+    return center_match && size_match;
+}
+
+bool Tracking::UpdateStaticTrackingState(const DrBBox &box)
+{
+    if (!filter_static_target_ || box.w <= 0.0f || box.h <= 0.0f)
+    {
+        return false;
+    }
+
+    if (!has_last_box_)
+    {
+        last_box_ = box;
+        has_last_box_ = true;
+        static_frame_count_ = 0;
+        return false;
+    }
+
+    bool center_stable =
+        std::fabs(box.cx - last_box_.cx) <= static_center_threshold_ &&
+        std::fabs(box.cy - last_box_.cy) <= static_center_threshold_;
+    bool size_stable =
+        std::fabs(box.w - last_box_.w) <= static_size_threshold_ &&
+        std::fabs(box.h - last_box_.h) <= static_size_threshold_;
+
+    if (center_stable && size_stable)
+    {
+        static_frame_count_++;
+    }
+    else
+    {
+        static_frame_count_ = 0;
+    }
+
+    last_box_ = box;
+    return static_frame_count_ >= static_frame_threshold_;
+}
+
+void Tracking::FillStaticFilterState(std::shared_ptr<DetectDataMsg> &msg) const
+{
+    msg->filterStaticTargetEnabled = filter_static_target_;
+    msg->hasBlockedTarget = has_blocked_target_;
+    msg->blockedCenterX = blocked_target_.cx;
+    msg->blockedCenterY = blocked_target_.cy;
+    msg->blockedWidth = blocked_target_.w;
+    msg->blockedHeight = blocked_target_.h;
+    msg->staticCenterThreshold = static_center_threshold_;
+    msg->staticSizeThreshold = static_size_threshold_;
 }
 
 AclLiteError Tracking::Process(int msgId, std::shared_ptr<void> data)
@@ -192,42 +269,68 @@ AclLiteError Tracking::Process(int msgId, std::shared_ptr<void> data)
                 // 选择最高分目标作为跟踪目标(后处理已把最佳目标放在首位)
                 if (!detectDataMsg->detections.empty())
                 {
-                    const DetectionOBB &best = detectDataMsg->detections[0];
-
-                    DrOBB initBox;
-                    initBox.box.x0 = best.x0;
-                    initBox.box.y0 = best.y0;
-                    initBox.box.x1 = best.x1;
-                    initBox.box.y1 = best.y1;
-                    initBox.class_id = best.class_id;
-                    // preserve detection init score in DrOBB for follow-up tracking
-                    initBox.score = best.score;
-                    initBox.initScore = best.score;
-
-                    if (this->init(img, initBox) == 0)
+                    const DetectionOBB *bestPtr = nullptr;
+                    for (size_t i = 0; i < detectDataMsg->detections.size(); ++i)
                     {
-                        tracking_initialized_ = true;
-                        track_loss_count_ = 0;
-                        current_tracking_confidence_ = best.score;
-                        
-                        // Store tracking result in new structure
-                        detectDataMsg->trackingResult.bbox = best;
-                        detectDataMsg->trackingResult.isTracked = true;
-                        detectDataMsg->trackingResult.initScore = best.score;
-                        detectDataMsg->trackingResult.curScore = best.score;
-                        
-                        // 设置跟踪状态
-                        detectDataMsg->trackingActive = true;
-                        detectDataMsg->trackingConfidence = best.score;
-                        detectDataMsg->needRedetection = false;
-                        
-                        // Keep old fields for backward compatibility
-                        detectDataMsg->hasTracking = true;
-                        detectDataMsg->trackInitScore = best.score;
-                        detectDataMsg->trackScore = best.score;
-                        
-                        // 通知DataInput跟踪已激活，DataInput可以进入TRACK_ONLY模式
-                        SendTrackingStateFeedback(detectDataMsg);
+                        if (!IsBlockedDetection(detectDataMsg->detections[i]))
+                        {
+                            bestPtr = &detectDataMsg->detections[i];
+                            break;
+                        }
+                    }
+                    if (bestPtr == nullptr)
+                    {
+                        ACLLITE_LOG_INFO(
+                            "[Tracking Ch%d] Skip init due to blocked target signature",
+                            detectDataMsg->channelId);
+                    }
+                    else
+                    {
+                        const DetectionOBB &best = *bestPtr;
+
+                        DrOBB initBox;
+                        initBox.box.x0 = best.x0;
+                        initBox.box.y0 = best.y0;
+                        initBox.box.x1 = best.x1;
+                        initBox.box.y1 = best.y1;
+                        initBox.class_id = best.class_id;
+                        // preserve detection init score in DrOBB for follow-up tracking
+                        initBox.score = best.score;
+                        initBox.initScore = best.score;
+
+                        if (this->init(img, initBox) == 0)
+                        {
+                            tracking_initialized_ = true;
+                            track_loss_count_ = 0;
+                            current_tracking_confidence_ = best.score;
+                            static_frame_count_ = 0;
+                            last_box_ = initBox.box;
+                            has_last_box_ = true;
+                            if (has_blocked_target_ &&
+                                !IsBlockedDetection(best))
+                            {
+                                has_blocked_target_ = false;
+                            }
+                            
+                            // Store tracking result in new structure
+                            detectDataMsg->trackingResult.bbox = best;
+                            detectDataMsg->trackingResult.isTracked = true;
+                            detectDataMsg->trackingResult.initScore = best.score;
+                            detectDataMsg->trackingResult.curScore = best.score;
+                            
+                            // 设置跟踪状态
+                            detectDataMsg->trackingActive = true;
+                            detectDataMsg->trackingConfidence = best.score;
+                            detectDataMsg->needRedetection = false;
+                            
+                            // Keep old fields for backward compatibility
+                            detectDataMsg->hasTracking = true;
+                            detectDataMsg->trackInitScore = best.score;
+                            detectDataMsg->trackScore = best.score;
+                            
+                            // 通知DataInput跟踪已激活，DataInput可以进入TRACK_ONLY模式
+                            SendTrackingStateFeedback(detectDataMsg);
+                        }
                     }
                 }
             }
@@ -263,6 +366,7 @@ AclLiteError Tracking::Process(int msgId, std::shared_ptr<void> data)
             }
         }
 
+        FillStaticFilterState(detectDataMsg);
         // Forward message to DataOutputThread
         MsgSend(detectDataMsg);
         return ACLLITE_OK;
@@ -340,6 +444,11 @@ AclLiteError Tracking::Process(int msgId, std::shared_ptr<void> data)
             
             // ============ 判断是否需要重新检测 ============
             bool needRedetection = false;
+            bool isStaticSuspect = false;
+            if (filter_static_target_)
+            {
+                isStaticSuspect = UpdateStaticTrackingState(tracked.box);
+            }
             
             if (tracked.score < confidence_redetect_threshold_)
             {
@@ -362,6 +471,24 @@ AclLiteError Tracking::Process(int msgId, std::shared_ptr<void> data)
                 track_loss_count_ = 0;
             }
             
+            if (isStaticSuspect)
+            {
+                needRedetection = true;
+                tracking_initialized_ = false;
+                track_loss_count_ = 0;
+                static_frame_count_ = 0;
+                has_last_box_ = false;
+                has_blocked_target_ = true;
+                blocked_target_ = tracked.box;
+                detectDataMsg->trackingResult.isTracked = false;
+                detectDataMsg->hasTracking = false;
+                ACLLITE_LOG_WARNING(
+                    "[Tracking Ch%d] Suspect static target, block center(%.1f,%.1f) size(%.1f,%.1f)",
+                    detectDataMsg->channelId,
+                    blocked_target_.cx, blocked_target_.cy,
+                    blocked_target_.w, blocked_target_.h);
+            }
+
             // 更新消息状态
             detectDataMsg->trackingActive = !needRedetection && (tracked.score >= confidence_active_threshold_);
             detectDataMsg->trackingConfidence = tracked.score;
@@ -374,6 +501,7 @@ AclLiteError Tracking::Process(int msgId, std::shared_ptr<void> data)
             }
         }
         
+        FillStaticFilterState(detectDataMsg);
         // Forward to output
         MsgSend(detectDataMsg);
         return ACLLITE_OK;
@@ -496,6 +624,35 @@ void Tracking::setConfidenceRedetectThreshold(float threshold)
 void Tracking::setMaxTrackLossFrames(int maxFrames)
 {
     this->max_track_loss_frames_ = maxFrames;
+}
+
+void Tracking::setStaticTargetFilterEnabled(bool enabled)
+{
+    this->filter_static_target_ = enabled;
+}
+
+void Tracking::setStaticCenterThreshold(float threshold)
+{
+    if (threshold > 0.0f)
+    {
+        this->static_center_threshold_ = threshold;
+    }
+}
+
+void Tracking::setStaticSizeThreshold(float threshold)
+{
+    if (threshold > 0.0f)
+    {
+        this->static_size_threshold_ = threshold;
+    }
+}
+
+void Tracking::setStaticFrameThreshold(int frames)
+{
+    if (frames > 0)
+    {
+        this->static_frame_threshold_ = frames;
+    }
 }
 
 void Tracking::resetMaxPredScore() { this->max_pred_score = 0.0f; }

@@ -53,6 +53,12 @@ AclLiteError DetectInferenceThread::Init()
         ACLLITE_LOG_ERROR("Model init failed, error:%d", ret);
         return ret;
     }
+    modelOutputInfo_.clear();
+    ret = model_.GetModelOutputInfo(modelOutputInfo_);
+    if (ret != ACLLITE_OK || modelOutputInfo_.empty())
+    {
+        ACLLITE_LOG_WARNING("Get model output info failed, fallback to size only");
+    }
     return ACLLITE_OK;
 }
 
@@ -74,6 +80,11 @@ DetectInferenceThread::ModelExecute(shared_ptr<DetectDataMsg> detectDataMsg)
         ACLLITE_LOG_ERROR("Execute detect model inference failed, error: %d",
                           ret);
         return ACLLITE_ERROR;
+    }
+    if (!modelOutputInfo_.empty())
+    {
+        detectDataMsg->detectOutputDims = modelOutputInfo_[0].dims;
+        detectDataMsg->hasDetectOutputDims = true;
     }
     model_.DestroyInput();
     return ACLLITE_OK;

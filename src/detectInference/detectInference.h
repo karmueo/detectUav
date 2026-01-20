@@ -23,6 +23,7 @@
 #include "AclLiteModel.h"
 #include "AclLiteThread.h"
 #include "Params.h"
+#include <vector>
 #include <unistd.h>
 
 /**
@@ -43,6 +44,7 @@ class DetectInferenceThread : public AclLiteThread
   private:
     AclLiteModel model_;
     bool         isReleased;
+    std::vector<ModelOutputInfo> modelOutputInfo_;
 };
 
 #endif

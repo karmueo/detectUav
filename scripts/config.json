@@ -12,7 +12,13 @@
                     "target_class_id": 1,
                     "track_config": {
                         "enable_tracking": true,
-                        "track_model_path": "/root/work/AntiUav/model/mixformerv2_online_small_bs1.om"
+                        "track_model_path": "/root/work/AntiUav/model/mixformerv2_online_small_bs1.om",
+                        "tracking_config": {
+                            "filter_suspect_static_target": true,
+                            "static_center_threshold": 2.0,
+                            "static_size_threshold": 2.0,
+                            "static_frame_threshold": 30
+                        }
                     },
                     "io_info":[
                         {

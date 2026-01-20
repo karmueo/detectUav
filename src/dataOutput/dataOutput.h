@@ -85,6 +85,14 @@ class DataOutputThread : public AclLiteThread
         std::vector<std::string>  textPrint;
         bool                      trackingActive = false;
         float                     trackingConfidence = 0.0f;
+        bool                      filterStaticTargetEnabled = false;
+        bool                      hasBlockedTarget = false;
+        float                     blockedCenterX = 0.0f;
+        float                     blockedCenterY = 0.0f;
+        float                     blockedWidth = 0.0f;
+        float                     blockedHeight = 0.0f;
+        float                     staticCenterThreshold = 0.0f;
+        float                     staticSizeThreshold = 0.0f;
     };
     std::unordered_map<uint32_t, CachedResult> lastResults_;
 };

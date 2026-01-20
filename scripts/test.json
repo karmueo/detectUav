@@ -17,7 +17,11 @@
                             "confidence_active_threshold": 0.60,
                             "confidence_redetect_threshold": 0.60,
                             "max_track_loss_frames": 5,
-                            "score_decay_factor": 0.98
+                            "score_decay_factor": 0.98,
+                            "filter_suspect_static_target": true,
+                            "static_center_threshold": 2.0,
+                            "static_size_threshold": 2.0,
+                            "static_frame_threshold": 30
                         }
                     },
                     "io_info":[

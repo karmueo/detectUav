@@ -33,6 +33,7 @@ class DetectPostprocessThread : public AclLiteThread
     bool         sendLastBatch_;
     uint32_t     batch_;
     int          targetClassId_; // <0 means no class filtering
+    bool         targetClassChecked_ = false;
 };
 
 #endif

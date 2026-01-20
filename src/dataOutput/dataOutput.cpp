@@ -21,6 +21,7 @@
 #include "drawing.h"
 #include "label.h"
 #include <chrono>
+#include <cmath>
 #include <sys/time.h>
 #include <cstdio>
 
@@ -265,6 +266,28 @@ DataOutputThread::ProcessOutput(shared_ptr<DetectDataMsg> detectDataMsg)
             for (size_t i = 0; i < detectDataMsg->detections.size(); ++i)
             {
                 const auto &d = detectDataMsg->detections[i];
+                if (detectDataMsg->filterStaticTargetEnabled &&
+                    detectDataMsg->hasBlockedTarget)
+                {
+                    float det_w = d.x1 - d.x0;
+                    float det_h = d.y1 - d.y0;
+                    float det_cx = (d.x0 + d.x1) * 0.5f;
+                    float det_cy = (d.y0 + d.y1) * 0.5f;
+                    bool center_match =
+                        std::fabs(det_cx - detectDataMsg->blockedCenterX) <=
+                        detectDataMsg->staticCenterThreshold &&
+                        std::fabs(det_cy - detectDataMsg->blockedCenterY) <=
+                        detectDataMsg->staticCenterThreshold;
+                    bool size_match =
+                        std::fabs(det_w - detectDataMsg->blockedWidth) <=
+                        detectDataMsg->staticSizeThreshold &&
+                        std::fabs(det_h - detectDataMsg->blockedHeight) <=
+                        detectDataMsg->staticSizeThreshold;
+                    if (center_match && size_match)
+                    {
+                        continue;
+                    }
+                }
                 const std::string detClassName =
                     (d.class_id >= 0 && d.class_id < (int)labelCount) ?
                         ::label[d.class_id] : std::to_string(d.class_id);
@@ -355,6 +378,14 @@ void DataOutputThread::UpdateCachedResult(
     cache.textPrint = detectDataMsg->textPrint;
     cache.trackingActive = detectDataMsg->trackingActive;
     cache.trackingConfidence = detectDataMsg->trackingConfidence;
+    cache.filterStaticTargetEnabled = detectDataMsg->filterStaticTargetEnabled;
+    cache.hasBlockedTarget = detectDataMsg->hasBlockedTarget;
+    cache.blockedCenterX = detectDataMsg->blockedCenterX;
+    cache.blockedCenterY = detectDataMsg->blockedCenterY;
+    cache.blockedWidth = detectDataMsg->blockedWidth;
+    cache.blockedHeight = detectDataMsg->blockedHeight;
+    cache.staticCenterThreshold = detectDataMsg->staticCenterThreshold;
+    cache.staticSizeThreshold = detectDataMsg->staticSizeThreshold;
 }
 
 void DataOutputThread::ApplyCachedResult(
@@ -372,6 +403,14 @@ void DataOutputThread::ApplyCachedResult(
     detectDataMsg->textPrint = cache.textPrint;
     detectDataMsg->trackingActive = cache.trackingActive;
     detectDataMsg->trackingConfidence = cache.trackingConfidence;
+    detectDataMsg->filterStaticTargetEnabled = cache.filterStaticTargetEnabled;
+    detectDataMsg->hasBlockedTarget = cache.hasBlockedTarget;
+    detectDataMsg->blockedCenterX = cache.blockedCenterX;
+    detectDataMsg->blockedCenterY = cache.blockedCenterY;
+    detectDataMsg->blockedWidth = cache.blockedWidth;
+    detectDataMsg->blockedHeight = cache.blockedHeight;
+    detectDataMsg->staticCenterThreshold = cache.staticCenterThreshold;
+    detectDataMsg->staticSizeThreshold = cache.staticSizeThreshold;
     detectDataMsg->hasTracking = cache.trackingResult.isTracked;
     detectDataMsg->trackScore = cache.trackingResult.curScore;
     detectDataMsg->trackInitScore = cache.trackingResult.initScore;

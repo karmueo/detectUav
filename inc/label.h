@@ -27,5 +27,5 @@ language governing permissions and
 #ifndef modelInference_label_H
 #define modelInference_label_H
 using namespace std;
-const string label[] = {"bird", "uav"};
+const string label[] = {"bird", "uav", "night_uav"};
 #endif // modelInference_label_H

@@ -31,6 +31,7 @@
 #include "pushrtsp/pushrtspthread.h"
 #include "hdmiOutput/hdmiOutputThread.h"
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <dirent.h>
 #include <fstream>
@@ -137,6 +138,41 @@ static bool ParseTargetClassIds(const Json::Value &value,
     ACLLITE_LOG_WARNING("target_class_id type not supported at %s, ignoring",
                         scope.c_str());
     return false;
+}
+
+// ParseResizeType 解析缩放方式配置。
+// Args:
+//   value: JSON 值。
+//   scope: 日志上下文信息，用于定位配置来源。
+// Returns:
+//   解析后的缩放方式，默认等比缩放。
+static ResizeProcessType ParseResizeType(const Json::Value &value,
+                                         const string &scope)
+{
+    if (value.type() == Json::nullValue)
+    {
+        return VPC_PT_FIT;
+    }
+    if (!value.isString())
+    {
+        ACLLITE_LOG_WARNING("resize_type must be string at %s, use default",
+                            scope.c_str());
+        return VPC_PT_FIT;
+    }
+    string type = TrimString(value.asString()); // 缩放类型
+    std::transform(type.begin(), type.end(), type.begin(), ::tolower);
+    if (type == "fit")
+    {
+        return VPC_PT_FIT;
+    }
+    if (type == "stretch" || type == "direct" || type == "resize")
+    {
+        return VPC_PT_DEFAULT;
+    }
+    ACLLITE_LOG_WARNING("Unknown resize_type=%s at %s, use default",
+                        type.c_str(),
+                        scope.c_str());
+    return VPC_PT_FIT;
 }
 
 string ReadFirstLine(const string &path)
@@ -348,6 +384,22 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                         "model_config",
                         &model_target_class_ids);
                 }
+                ResizeProcessType modelResizeType = VPC_PT_FIT; // 缩放方式
+                bool modelUseNms = true; // 是否启用NMS
+                if (root["device_config"][i]["model_config"][j]["resize_type"]
+                        .type() != Json::nullValue)
+                {
+                    modelResizeType = ParseResizeType(
+                        root["device_config"][i]["model_config"][j]["resize_type"],
+                        "model_config");
+                }
+                if (root["device_config"][i]["model_config"][j]["use_nms"]
+                        .type() != Json::nullValue)
+                {
+                    modelUseNms =
+                        root["device_config"][i]["model_config"][j]["use_nms"]
+                            .asBool(); // 是否启用NMS
+                }
                 // Note: legacy field 'frame_skip' is no longer supported. Use 'frame_decimation'.
 
                 if (modelWidth < 0 || modelHeigth < 0 || kBatch < 1 ||
@@ -416,6 +468,26 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                         root["device_config"][i]["model_config"][j]["io_info"]
                             [k]["channel_id"]
                                 .asInt();
+                    ResizeProcessType channelResizeType = modelResizeType; // 缩放方式
+                    bool channelUseNms = modelUseNms; // 是否启用NMS
+                    if (root["device_config"][i]["model_config"][j]["io_info"][k]
+                            ["resize_type"]
+                                .type() != Json::nullValue)
+                    {
+                        channelResizeType = ParseResizeType(
+                            root["device_config"][i]["model_config"][j]["io_info"][k]
+                                ["resize_type"],
+                            "io_info");
+                    }
+                    if (root["device_config"][i]["model_config"][j]["io_info"][k]
+                            ["use_nms"]
+                                .type() != Json::nullValue)
+                    {
+                        channelUseNms =
+                            root["device_config"][i]["model_config"][j]["io_info"][k]
+                                ["use_nms"]
+                                    .asBool(); // 是否启用NMS
+                    }
                     
                     // 解析 RTSP 和 H264 编码配置
                     VencConfig vencConfig;
@@ -587,7 +659,10 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
 
                     AclLiteThreadParam detectPreParam;
                     detectPreParam.threadInst = new DetectPreprocessThread(
-                        modelWidth, modelHeigth, kBatch);
+                        modelWidth,
+                        modelHeigth,
+                        kBatch,
+                        channelResizeType);
                     detectPreParam.threadInstName.assign(preName.c_str());
                     detectPreParam.context = context;
                     detectPreParam.runMode = runMode;
@@ -604,7 +679,9 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                                 modelHeigth,
                                 runMode,
                                 kBatch,
-                                channel_target_class_ids);
+                                channel_target_class_ids,
+                                channelResizeType,
+                                channelUseNms);
                         detectPostParam.threadInstName.assign(postName.c_str());
                         detectPostParam.context = context;
                         detectPostParam.runMode = runMode;

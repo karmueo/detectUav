@@ -118,13 +118,14 @@ AclLiteError AclLiteImageProc::Init(string mode)
     return ACLLITE_OK;
 }
 
-AclLiteError AclLiteImageProc::Resize(ImageData &dest,
-                                      ImageData &src,
-                                      uint32_t   width,
-                                      uint32_t   height)
+AclLiteError AclLiteImageProc::Resize(ImageData        &dest,
+                                      ImageData        &src,
+                                      uint32_t          width,
+                                      uint32_t          height,
+                                      ResizeProcessType resizeType)
 {
     ResizeHelper resizeOp(stream_, dvppChannelDesc_, width, height);
-    return resizeOp.Process(dest, src);
+    return resizeOp.Process(dest, src, resizeType);
 }
 
 AclLiteError AclLiteImageProc::JpegD(ImageData &dest, ImageData &src)

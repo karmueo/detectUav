@@ -7,6 +7,8 @@
                     "model_path":"/root/work/AntiUav/model/yolov11n_110_rgb_640_raw_v0_bs1.om",
                     "model_width":640,
                     "model_heigth":640,
+                    "resize_type": "fit",
+                    "use_nms": true,
                     "model_batch": 1,
                     "frame_decimation": 2,
                     "target_class_id": 1,

@@ -95,6 +95,7 @@ class DataOutputThread : public AclLiteThread
         float                     staticSizeThreshold = 0.0f;
     };
     std::unordered_map<uint32_t, CachedResult> lastResults_;
+    std::unordered_map<uint32_t, int>          lastOutputMsgNum_; // 每路通道最后输出的帧序号
 };
 
 #endif

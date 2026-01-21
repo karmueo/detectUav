@@ -19,6 +19,7 @@
 #define ACLLITE_IMAGE_PROC_H
 #pragma once
 #include "AclLiteUtils.h"
+#include "ResizeHelper.h"
 #include "acl/acl.h"
 #include "acl/ops/acl_dvpp.h"
 #include <cstdint>
@@ -45,8 +46,11 @@ class AclLiteImageProc
      * @return AclLiteError ACLLITE_OK: read success
      * others: resize failed
      */
-    AclLiteError
-    Resize(ImageData &dest, ImageData &src, uint32_t width, uint32_t height);
+    AclLiteError Resize(ImageData &dest,
+                        ImageData &src,
+                        uint32_t   width,
+                        uint32_t   height,
+                        ResizeProcessType resizeType = VPC_PT_FIT);
     /**
      * @brief Realize the decoding of .jpg, .jpeg, .JPG, .JPEG image files.
      * @param [in]: destYuv: decoded yuv image

@@ -159,7 +159,10 @@ bool FFmpegDecoder::OpenVideo(AVFormatContext *&avFormatContext)
     av_log_set_level(AV_LOG_ERROR);
 
     ACLLITE_LOG_INFO("Open video %s ...", streamName_.c_str());
-    SetDictForRtsp(avdic);
+    if (IsRtspAddr(streamName_))
+    {
+        SetDictForRtsp(avdic);
+    }
     int openRet = avformat_open_input(
         &avFormatContext, streamName_.c_str(), nullptr, &avdic);
     if (openRet < 0)
@@ -298,12 +301,17 @@ void FFmpegDecoder::GetVideoInfo()
         return;
     }
 
-    // Set options for avformat_find_stream_info to improve RTSP stream analysis
     AVDictionary *opts = nullptr;
-    av_dict_set(&opts, "analyzeduration", "5000000", 0);  // 5 seconds
-    av_dict_set(&opts, "probesize", "5000000", 0);        // 5MB
+    if (IsRtspAddr(streamName_))
+    {
+        // Set options for avformat_find_stream_info to improve RTSP analysis
+        av_dict_set(&opts, "analyzeduration", "5000000", 0);  // 5 seconds
+        av_dict_set(&opts, "probesize", "5000000", 0);        // 5MB
+    }
     
-    int findStreamRet = avformat_find_stream_info(avFormatContext, &opts);
+    int findStreamRet =
+        avformat_find_stream_info(avFormatContext,
+                                  (opts != nullptr) ? &opts : nullptr);
     if (opts != nullptr)
     {
         av_dict_free(&opts);
@@ -808,26 +816,34 @@ void VideoCapture::SleeptoNextFrameTime()
         return;
     }
 
-    /*
+    if (fpsInterval_ <= 0)
+    {
+        return;
+    }
+
     // get current time
     timeval tv;
     gettimeofday(&tv, 0);
     int64_t now = (int64_t)tv.tv_sec * 1000000 + (int64_t)tv.tv_usec;
 
-    if (lastDecodeTime_ == 0) {
+    if (lastDecodeTime_ == 0)
+    {
         lastDecodeTime_ = now;
         return;
     }
+
     // calculate interval
     int64_t lastInterval = (now - lastDecodeTime_);
-    int64_t sleepTime = (lastInterval <
-    fpsInterval_)?(fpsInterval_-lastInterval):0;
-    // consume rest time
-    usleep(sleepTime);
+    int64_t sleepTime =
+        (lastInterval < fpsInterval_) ? (fpsInterval_ - lastInterval) : 0;
+    if (sleepTime > 0)
+    {
+        usleep(sleepTime);
+    }
+
     // record start time of next frame
     gettimeofday(&tv, 0);
     lastDecodeTime_ = (int64_t)tv.tv_sec * 1000000 + (int64_t)tv.tv_usec;
-    */
 
     return;
 }

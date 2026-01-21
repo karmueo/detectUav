@@ -13,9 +13,11 @@ const uint32_t kSleepTime = 500;
 
 DetectPreprocessThread::DetectPreprocessThread(uint32_t modelWidth,
                                                uint32_t modelHeight,
-                                               uint32_t batch)
+                                               uint32_t batch,
+                                               ResizeProcessType resizeType)
     : modelWidth_(modelWidth),
       modelHeight_(modelHeight),
+      resizeType_(resizeType),
       isReleased(false),
       batch_(batch)
 {
@@ -73,6 +75,7 @@ AclLiteError
 DetectPreprocessThread::MsgProcess(shared_ptr<DetectDataMsg> detectDataMsg)
 {
     AclLiteError ret;
+    detectDataMsg->resizeType = resizeType_;
 
     uint32_t modelInputSize = YUV420SP_SIZE(modelWidth_, modelHeight_) * batch_;
     void    *buf = nullptr;
@@ -95,7 +98,8 @@ DetectPreprocessThread::MsgProcess(shared_ptr<DetectDataMsg> detectDataMsg)
         ret = dvpp_.Resize(resizedImg,
                            detectDataMsg->decodedImg[i],
                            modelWidth_,
-                           modelHeight_);
+                           modelHeight_,
+                           resizeType_);
         if (ret == ACLLITE_ERROR)
         {
             ACLLITE_LOG_ERROR("Resize image failed");

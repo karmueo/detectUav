@@ -200,6 +200,27 @@ AclLiteError DataOutputThread::DataProcess()
 AclLiteError
 DataOutputThread::ProcessOutput(shared_ptr<DetectDataMsg> detectDataMsg)
 {
+    int channel_id = detectDataMsg->channelId; // 通道ID
+    int current_msg = detectDataMsg->msgNum;   // 当前帧序号
+    if (current_msg == 0)
+    {
+        lastOutputMsgNum_[channel_id] = -1;
+    }
+    auto last_it = lastOutputMsgNum_.find(channel_id);
+    if (last_it != lastOutputMsgNum_.end() && current_msg <= last_it->second)
+    {
+        static int drop_count = 0; // 乱序/回退帧计数
+        if (++drop_count % 30 == 0)
+        {
+            ACLLITE_LOG_WARNING(
+                "[DataOutput] Drop out-of-order frame: ch=%d, msg=%d, last=%d",
+                channel_id,
+                current_msg,
+                last_it->second);
+        }
+        return ACLLITE_OK;
+    }
+
     // Calculate end-to-end latency
     struct timeval tv;
     gettimeofday(&tv, nullptr);
@@ -365,6 +386,7 @@ DataOutputThread::ProcessOutput(shared_ptr<DetectDataMsg> detectDataMsg)
     }
 
     UpdateCachedResult(detectDataMsg);
+    lastOutputMsgNum_[channel_id] = current_msg;
 
     return ACLLITE_OK;
 }

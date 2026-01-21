@@ -5,6 +5,7 @@
 #include "Params.h"
 #include "label.h"
 #include <cstddef>
+#include <limits>
 #include <iostream>
 #include <iomanip>
 #include <sstream>
@@ -39,9 +40,13 @@ DetectPostprocessThread::DetectPostprocessThread(uint32_t      modelWidth,
                                                  uint32_t      modelHeight,
                                                  aclrtRunMode &runMode,
                                                  uint32_t      batch,
-                                                 const vector<int> &targetClassIds)
+                                                 const vector<int> &targetClassIds,
+                                                 ResizeProcessType resizeType,
+                                                 bool          useNms)
     : modelWidth_(modelWidth),
       modelHeight_(modelHeight),
+      resizeType_(resizeType),
+      useNms_(useNms),
       runMode_(runMode),
       sendLastBatch_(false),
       batch_(batch),
@@ -116,59 +121,107 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
     }
     
     float *hostBuff = static_cast<float *>(hostAllBuffer);
-    size_t floatsPerFrame = (detectDataMsg->inferenceOutput[0].size / batch_) / sizeof(float);
+    size_t floatsPerFrame =
+        (detectDataMsg->inferenceOutput[0].size / batch_) / sizeof(float);
+    size_t labelCount = GetLabelCount();
     uint32_t numChannels = 0;
-    if (detectDataMsg->hasDetectOutputDims &&
-        detectDataMsg->detectOutputDims.dimCount >= 2)
+    uint32_t numClasses = 0;
+    uint32_t numPredictionsPerFrame = 0;
+    uint32_t numBoxesPerFrame = 0;
+    uint32_t boxElementCount = 0;
+    if (useNms_)
     {
-        int64_t channelDim = detectDataMsg->detectOutputDims.dims[1];
-        if (channelDim > 0)
+        if (detectDataMsg->hasDetectOutputDims &&
+            detectDataMsg->detectOutputDims.dimCount >= 2)
         {
-            numChannels = static_cast<uint32_t>(channelDim);
-        }
-    }
-    if (numChannels == 0)
-    {
-        numChannels = static_cast<uint32_t>(4 + GetLabelCount());
-        static bool fallbackWarned = false;
-        if (!fallbackWarned)
-        {
-            ACLLITE_LOG_WARNING(
-                "Detect output dims unavailable, fallback to label-based channels %u",
-                numChannels);
-            fallbackWarned = true;
-        }
-    }
-    if (numChannels <= 4)
-    {
-        ACLLITE_LOG_ERROR("Invalid detect output channel count: %u",
-                          numChannels);
-        delete[] static_cast<uint8_t*>(hostAllBuffer);
-        return ACLLITE_ERROR;
-    }
-    uint32_t numClasses = numChannels - 4;
-    uint32_t numPredictionsPerFrame =
-        (floatsPerFrame > 0) ? floatsPerFrame / numChannels : 0;
-    if (!targetClassChecked_)
-    {
-        if (!targetClassIds_.empty())
-        {
-            for (size_t i = 0 /* 索引 */; i < targetClassIds_.size(); ++i)
+            int64_t channelDim = detectDataMsg->detectOutputDims.dims[1];
+            if (channelDim > 0)
             {
-                if (targetClassIds_[i] >= static_cast<int>(numClasses))
-                {
-                    ACLLITE_LOG_WARNING(
-                        "Configured target_class_id %d exceeds supported classes [%u), "
-                        "detections with this id will be filtered out",
-                        targetClassIds_[i],
-                        numClasses);
-                }
+                numChannels = static_cast<uint32_t>(channelDim);
             }
         }
-        targetClassChecked_ = true;
+        if (numChannels == 0)
+        {
+            numChannels = static_cast<uint32_t>(4 + GetLabelCount());
+            static bool fallbackWarned = false;
+            if (!fallbackWarned)
+            {
+                ACLLITE_LOG_WARNING(
+                    "Detect output dims unavailable, fallback to label-based channels %u",
+                    numChannels);
+                fallbackWarned = true;
+            }
+        }
+        if (numChannels <= 4)
+        {
+            ACLLITE_LOG_ERROR("Invalid detect output channel count: %u",
+                              numChannels);
+            delete[] static_cast<uint8_t*>(hostAllBuffer);
+            return ACLLITE_ERROR;
+        }
+        numClasses = numChannels - 4;
+        numPredictionsPerFrame =
+            (floatsPerFrame > 0) ? floatsPerFrame / numChannels : 0;
+        if (!targetClassChecked_)
+        {
+            if (!targetClassIds_.empty())
+            {
+                for (size_t i = 0 /* 索引 */; i < targetClassIds_.size(); ++i)
+                {
+                    if (targetClassIds_[i] >= static_cast<int>(numClasses))
+                    {
+                        ACLLITE_LOG_WARNING(
+                            "Configured target_class_id %d exceeds supported classes [%u), "
+                            "detections with this id will be filtered out",
+                            targetClassIds_[i],
+                            numClasses);
+                    }
+                }
+            }
+            targetClassChecked_ = true;
+        }
     }
-    size_t labelCount = GetLabelCount();
+    else
+    {
+        if (detectDataMsg->hasDetectOutputDims &&
+            detectDataMsg->detectOutputDims.dimCount >= 3)
+        {
+            int64_t boxDim = detectDataMsg->detectOutputDims.dims[1];
+            int64_t elemDim = detectDataMsg->detectOutputDims.dims[2];
+            if (boxDim > 0 && elemDim > 0)
+            {
+                numBoxesPerFrame = static_cast<uint32_t>(boxDim);
+                boxElementCount = static_cast<uint32_t>(elemDim);
+            }
+        }
+        if (numBoxesPerFrame == 0 || boxElementCount == 0)
+        {
+            boxElementCount = 6;
+            if (floatsPerFrame % boxElementCount != 0)
+            {
+                ACLLITE_LOG_ERROR(
+                    "Invalid detect output size for no-NMS mode, floatsPerFrame=%zu",
+                    floatsPerFrame);
+                delete[] static_cast<uint8_t*>(hostAllBuffer);
+                return ACLLITE_ERROR;
+            }
+            numBoxesPerFrame = floatsPerFrame / boxElementCount;
+        }
+        if (boxElementCount < 6)
+        {
+            ACLLITE_LOG_ERROR(
+                "Invalid box element count %u in no-NMS mode", boxElementCount);
+            delete[] static_cast<uint8_t*>(hostAllBuffer);
+            return ACLLITE_ERROR;
+        }
+    }
     
+    ResizeProcessType effectiveResize = detectDataMsg->resizeType; // 实际缩放方式
+    if (effectiveResize != VPC_PT_FIT && effectiveResize != VPC_PT_DEFAULT)
+    {
+        effectiveResize = resizeType_;
+    }
+
     for (size_t n = 0; n < detectDataMsg->decodedImg.size(); n++)
     {
         float *detectBuff = hostBuff + n * floatsPerFrame;
@@ -193,72 +246,139 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
         // filter boxes by confidence threshold
         // OPTIMIZATION: Pre-allocate vector (Step 5) to reduce allocations
         vector<BoundBox> boxes;
-        boxes.reserve(std::min((size_t)1000, (size_t)numPredictionsPerFrame)); // reserve common detection count
-        
-        for (uint32_t i = 0; i < numPredictionsPerFrame; ++i)
+        if (useNms_)
         {
-            // Extract center coordinates and dimensions (in model input image size)
-            float cx = detectBuff[0 * numPredictionsPerFrame + i];
-            float cy = detectBuff[1 * numPredictionsPerFrame + i];
-            float w = detectBuff[2 * numPredictionsPerFrame + i];
-            float h = detectBuff[3 * numPredictionsPerFrame + i];
-
-            // Select the class with higher confidence
-            float score = detectBuff[4 * numPredictionsPerFrame + i];
-            uint32_t cls = 0;
-            for (uint32_t c = 1; c < numClasses; ++c)
+            boxes.reserve(std::min((size_t)1000, (size_t)numPredictionsPerFrame)); // reserve common detection count
+            
+            for (uint32_t i = 0; i < numPredictionsPerFrame; ++i)
             {
-                float conf =
-                    detectBuff[(4 + c) * numPredictionsPerFrame + i];
-                if (conf > score)
+                // Extract center coordinates and dimensions (in model input image size)
+                float cx = detectBuff[0 * numPredictionsPerFrame + i];
+                float cy = detectBuff[1 * numPredictionsPerFrame + i];
+                float w = detectBuff[2 * numPredictionsPerFrame + i];
+                float h = detectBuff[3 * numPredictionsPerFrame + i];
+
+                // Select the class with higher confidence
+                float score = detectBuff[4 * numPredictionsPerFrame + i];
+                uint32_t cls = 0;
+                for (uint32_t c = 1; c < numClasses; ++c)
                 {
-                    score = conf;
-                    cls = c;
+                    float conf =
+                        detectBuff[(4 + c) * numPredictionsPerFrame + i];
+                    if (conf > score)
+                    {
+                        score = conf;
+                        cls = c;
+                    }
+                }
+
+                // Filter by confidence threshold
+                if (score <= kConfThresh)
+                    continue;
+                
+                // Optional class-id filtering from config
+                if (!targetClassIds_.empty() &&
+                    targetClassIdSet_.find(static_cast<int>(cls)) ==
+                        targetClassIdSet_.end())
+                {
+                    continue;
+                }
+
+                // Convert center coordinates to corner coordinates in model input size
+                float x1 = cx - w / 2.0f;
+                float y1 = cy - h / 2.0f;
+                float x2 = cx + w / 2.0f;
+                float y2 = cy + h / 2.0f;
+
+                if (effectiveResize == VPC_PT_FIT)
+                {
+                    // Remove padding offset first, then scale to original image size
+                    x1 = (x1 - padLeft) / resizeRatio;
+                    y1 = (y1 - padTop) / resizeRatio;
+                    x2 = (x2 - padLeft) / resizeRatio;
+                    y2 = (y2 - padTop) / resizeRatio;
+                }
+                else
+                {
+                    // Direct resize mapping
+                    x1 = x1 / scaleWidth;
+                    y1 = y1 / scaleHeight;
+                    x2 = x2 / scaleWidth;
+                    y2 = y2 / scaleHeight;
+                }
+
+                // Clip coordinates to valid range
+                x1 = max(0.0f, min(x1, (float)(srcWidth - 1)));
+                y1 = max(0.0f, min(y1, (float)(srcHeight - 1)));
+                x2 = max(0.0f, min(x2, (float)(srcWidth - 1)));
+                y2 = max(0.0f, min(y2, (float)(srcHeight - 1)));
+
+                // Convert to center coordinates and size for BoundBox
+                BoundBox box;
+                box.x = (x1 + x2) / 2.0f;
+                box.y = (y1 + y2) / 2.0f;
+                box.width = x2 - x1;
+                box.height = y2 - y1;
+                box.score = score;
+                box.classIndex = cls;
+                box.index = i;
+                
+                if (cls < numClasses)
+                {
+                    boxes.push_back(box);
                 }
             }
-
-            // Filter by confidence threshold
-            if (score <= kConfThresh)
-                continue;
-            
-            // Optional class-id filtering from config
-            if (!targetClassIds_.empty() &&
-                targetClassIdSet_.find(static_cast<int>(cls)) ==
-                    targetClassIdSet_.end())
+        }
+        else
+        {
+            boxes.reserve(std::min((size_t)1000, (size_t)numBoxesPerFrame));
+            for (uint32_t i = 0; i < numBoxesPerFrame; ++i)
             {
-                continue;
-            }
+                float x1 = detectBuff[i * boxElementCount + 0];
+                float y1 = detectBuff[i * boxElementCount + 1];
+                float x2 = detectBuff[i * boxElementCount + 2];
+                float y2 = detectBuff[i * boxElementCount + 3];
+                float score = detectBuff[i * boxElementCount + 4];
+                int   cls = static_cast<int>(detectBuff[i * boxElementCount + 5]);
 
-            // Convert center coordinates to corner coordinates in model input size
-            float x1 = cx - w / 2.0f;
-            float y1 = cy - h / 2.0f;
-            float x2 = cx + w / 2.0f;
-            float y2 = cy + h / 2.0f;
+                if (score <= kConfThresh)
+                {
+                    continue;
+                }
+                if (!targetClassIds_.empty() &&
+                    targetClassIdSet_.find(cls) == targetClassIdSet_.end())
+                {
+                    continue;
+                }
 
-            // Remove padding offset first, then scale to original image size
-            x1 = (x1 - padLeft) / resizeRatio;
-            y1 = (y1 - padTop) / resizeRatio;
-            x2 = (x2 - padLeft) / resizeRatio;
-            y2 = (y2 - padTop) / resizeRatio;
+                if (effectiveResize == VPC_PT_FIT)
+                {
+                    x1 = (x1 - padLeft) / resizeRatio;
+                    y1 = (y1 - padTop) / resizeRatio;
+                    x2 = (x2 - padLeft) / resizeRatio;
+                    y2 = (y2 - padTop) / resizeRatio;
+                }
+                else
+                {
+                    x1 = x1 / scaleWidth;
+                    y1 = y1 / scaleHeight;
+                    x2 = x2 / scaleWidth;
+                    y2 = y2 / scaleHeight;
+                }
 
-            // Clip coordinates to valid range
-            x1 = max(0.0f, min(x1, (float)(srcWidth - 1)));
-            y1 = max(0.0f, min(y1, (float)(srcHeight - 1)));
-            x2 = max(0.0f, min(x2, (float)(srcWidth - 1)));
-            y2 = max(0.0f, min(y2, (float)(srcHeight - 1)));
+                x1 = max(0.0f, min(x1, (float)(srcWidth - 1)));
+                y1 = max(0.0f, min(y1, (float)(srcHeight - 1)));
+                x2 = max(0.0f, min(x2, (float)(srcWidth - 1)));
+                y2 = max(0.0f, min(y2, (float)(srcHeight - 1)));
 
-            // Convert to center coordinates and size for BoundBox
-            BoundBox box;
-            box.x = (x1 + x2) / 2.0f;
-            box.y = (y1 + y2) / 2.0f;
-            box.width = x2 - x1;
-            box.height = y2 - y1;
-            box.score = score;
-            box.classIndex = cls;
-            box.index = i;
-            
-            if (cls < numClasses)
-            {
+                BoundBox box;
+                box.x = (x1 + x2) / 2.0f;
+                box.y = (y1 + y2) / 2.0f;
+                box.width = x2 - x1;
+                box.height = y2 - y1;
+                box.score = score;
+                box.classIndex = static_cast<size_t>(cls);
+                box.index = i;
                 boxes.push_back(box);
             }
         }
@@ -268,7 +388,7 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
         vector<BoundBox> result;
         result.reserve(boxes.size()); // pre-allocate (Step 5)
         
-        if (!boxes.empty())
+        if (!boxes.empty() && useNms_)
         {
             std::sort(boxes.begin(), boxes.end(), sortScore);
             
@@ -307,6 +427,10 @@ AclLiteError DetectPostprocessThread::InferOutputProcess(
                     }
                 }
             }
+        }
+        else
+        {
+            result = boxes;
         }
 
         // opencv draw label params

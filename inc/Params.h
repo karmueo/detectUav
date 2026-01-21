@@ -103,6 +103,7 @@ struct DetectDataMsg
     std::vector<InferenceOutput> inferenceOutput; // yolo detect output
     bool                         hasDetectOutputDims = false;
     aclmdlIODims                 detectOutputDims = {};
+    ResizeProcessType            resizeType = VPC_PT_FIT; // 预处理缩放方式
     std::vector<std::string>     textPrint;
     // structured detections (per frame index), single-image pipelines use index 0
     std::vector<DetectionOBB>    detections;

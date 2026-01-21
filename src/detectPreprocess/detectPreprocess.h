@@ -11,7 +11,8 @@ class DetectPreprocessThread : public AclLiteThread
   public:
     DetectPreprocessThread(uint32_t modelWidth,
                            uint32_t modelHeight,
-                           uint32_t batch);
+                           uint32_t batch,
+                           ResizeProcessType resizeType);
     ~DetectPreprocessThread();
     AclLiteError Init();
     AclLiteError Process(int msgId, std::shared_ptr<void> data);
@@ -23,6 +24,7 @@ class DetectPreprocessThread : public AclLiteThread
   private:
     uint32_t         modelWidth_;
     uint32_t         modelHeight_;
+    ResizeProcessType resizeType_;  // 预处理缩放方式
     AclLiteImageProc dvpp_;
     bool             isReleased;
     uint32_t         batch_;

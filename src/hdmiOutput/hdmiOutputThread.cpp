@@ -10,9 +10,44 @@
 
 namespace
 {
-void vo_mipi_get_sync_info(hi_vo_intf_sync intf_sync, vo_mst_sync_info *sync_info)
+// GetHdmiIntfSyncBySize 根据期望输出尺寸选择 HDMI 时序。
+// Args:
+//   width: 期望输出宽度。
+//   height: 期望输出高度。
+// Returns:
+//   HDMI 时序枚举值，默认返回 1080P60。
+hi_vo_intf_sync GetHdmiIntfSyncBySize(uint32_t width, uint32_t height)
+{
+    if (width == 1280 && height == 720)
+    {
+        return HI_VO_OUT_720P60;
+    }
+    if (width == 1920 && height == 1080)
+    {
+        return HI_VO_OUT_1080P60;
+    }
+    ACLLITE_LOG_WARNING("Unsupported HDMI size %ux%u, fallback to 1080P60",
+                        width,
+                        height);
+    return HI_VO_OUT_1080P60;
+}
+
+// vo_mipi_get_sync_info 根据时序填充同步信息。
+// Args:
+//   intf_sync: HDMI 时序枚举。
+//   sync_info: 输出同步信息。
+void vo_mipi_get_sync_info(hi_vo_intf_sync intf_sync,
+                           vo_mst_sync_info *sync_info)
 {
     sync_info->intf_sync = intf_sync;
+    if (intf_sync == HI_VO_OUT_720P60)
+    {
+        sync_info->name = const_cast<char *>("720P@60");
+        sync_info->width = 1280;
+        sync_info->height = 720;
+        sync_info->frame_rate = 60;
+        return;
+    }
     sync_info->name = const_cast<char *>("1080P@60");
     sync_info->width = 1920;
     sync_info->height = 1080;
@@ -292,19 +327,38 @@ HdmiOutputThread::~HdmiOutputThread()
 
 AclLiteError HdmiOutputThread::Init()
 {
-    // 固定使用 1080P60 时序（样例只支持 hdmi0 1080P60）
-    vo_mipi_get_sync_info(HI_VO_OUT_1080P60, &syncInfo_);
+    uint32_t desiredWidth = vencConfig_.outputWidth;   // 期望输出宽度
+    uint32_t desiredHeight = vencConfig_.outputHeight; // 期望输出高度
+    uint32_t desiredFps = vencConfig_.outputFps;       // 期望输出帧率
+    if (desiredWidth == 0 || desiredHeight == 0)
+    {
+        desiredWidth = 1920;
+        desiredHeight = 1080;
+    }
+    intfSync_ = GetHdmiIntfSyncBySize(desiredWidth, desiredHeight);
+    vo_mipi_get_sync_info(intfSync_, &syncInfo_);
     // 与 VO 时序保持一致，避免参数不匹配
     vencConfig_.outputWidth = syncInfo_.width;
     vencConfig_.outputHeight = syncInfo_.height;
-    vencConfig_.outputFps = syncInfo_.frame_rate;
+    if (desiredFps == 0 || desiredFps > syncInfo_.frame_rate)
+    {
+        vencConfig_.outputFps = syncInfo_.frame_rate;
+    }
+    else
+    {
+        vencConfig_.outputFps = desiredFps;
+    }
 
     AclLiteError ret = InitHdmi();
     if (ret != ACLLITE_OK) {
         ACLLITE_LOG_ERROR("Init HDMI failed");
         return ret;
     }
-    ACLLITE_LOG_INFO("HDMI init done, resolution %ux%u@%u", syncInfo_.width, syncInfo_.height, syncInfo_.frame_rate);
+    ACLLITE_LOG_INFO("HDMI init done, resolution %ux%u@%u (target_fps=%u)",
+                     syncInfo_.width,
+                     syncInfo_.height,
+                     syncInfo_.frame_rate,
+                     vencConfig_.outputFps);
     return ACLLITE_OK;
 }
 
@@ -431,7 +485,25 @@ AclLiteError HdmiOutputThread::HandleDisplay(std::shared_ptr<DetectDataMsg> dete
         ACLLITE_LOG_ERROR("HDMI is not initialized");
         return ACLLITE_ERROR;
     }
+    uint32_t targetFps = vencConfig_.outputFps; // 目标输出帧率
+    if (targetFps == 0 || targetFps > syncInfo_.frame_rate)
+    {
+        targetFps = syncInfo_.frame_rate;
+    }
+    int64_t frameIntervalUs = 1000000 / targetFps; // 帧间隔微秒
+    static auto lastSendTime = std::chrono::steady_clock::time_point(); // 上次发送时间
+    static bool hasLastSend = false; // 是否已有发送记录
     for (size_t i = 0; i < detectDataMsg->decodedImg.size(); ++i) {
+        if (!detectDataMsg->isLastFrame && hasLastSend)
+        {
+            auto now = std::chrono::steady_clock::now(); // 当前时间
+            auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                now - lastSendTime).count();
+            if (elapsed < frameIntervalUs)
+            {
+                continue;
+            }
+        }
         ImageData hostImg;
         AclLiteError ret = EnsureImageOnHost(detectDataMsg->decodedImg[i], hostImg);
         if (ret != ACLLITE_OK) {
@@ -443,6 +515,8 @@ AclLiteError HdmiOutputThread::HandleDisplay(std::shared_ptr<DetectDataMsg> dete
             ACLLITE_LOG_ERROR("Display frame to HDMI failed, error %d", ret);
             return ret;
         }
+        lastSendTime = std::chrono::steady_clock::now();
+        hasLastSend = true;
     }
 
     if (detectDataMsg->isLastFrame) {

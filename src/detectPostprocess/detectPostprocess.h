@@ -17,7 +17,9 @@ class DetectPostprocessThread : public AclLiteThread
                             uint32_t      modelHeight,
                             aclrtRunMode &runMode,
                             uint32_t      batch,
-                            const std::vector<int> &targetClassIds);
+                            const std::vector<int> &targetClassIds,
+                            ResizeProcessType resizeType,
+                            bool          useNms);
     ~DetectPostprocessThread();
 
     AclLiteError Init();
@@ -31,6 +33,8 @@ class DetectPostprocessThread : public AclLiteThread
   private:
     uint32_t     modelWidth_;
     uint32_t     modelHeight_;
+    ResizeProcessType resizeType_; // 预处理缩放方式
+    bool         useNms_;       // 是否使用NMS
     aclrtRunMode runMode_;
     bool         sendLastBatch_;
     uint32_t     batch_;

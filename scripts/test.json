@@ -1,51 +1,44 @@
 {
-    "device_config":[
+    "device_config": [
         {
-            "device_id":0,
-            "model_config":[
+            "device_id": 0,
+            "model_config": [
                 {
-                    "model_path":"./model/yolov11n_110_rgb_640_raw_v0_bs1.om",
-                    "model_width":640,
-                    "model_heigth":640,
-                    "resize_type": "fit",
-                    "use_nms": true,
+                    "model_path": "./model/detect.om",
+                    "model_width": 640,
+                    "model_heigth": 352,
+                    "resize_type": "stretch",
+                    "use_nms": false,
                     "model_batch": 1,
-                    "frame_decimation": 1,
-                    "target_class_id": 1,
-                    "track_config":{
+                    "frame_decimation": 0,
+                    "target_class_id": [
+                        0,
+                        1
+                    ],
+                    "track_config": {
                         "enable_tracking": true,
-                        "track_model_path":"./model/mixformerv2_online_small_bs1.om",
-                        "tracking_config":{
-                            "confidence_active_threshold": 0.60,
-                            "confidence_redetect_threshold": 0.60,
-                            "max_track_loss_frames": 5,
-                            "score_decay_factor": 0.98,
+                        "track_model_path": "/root/work/AntiUav/model/head.om;/root/work/AntiUav/model/backbone.om;/root/work/AntiUav/model/search.om",
+                        "tracking_config": {
+                            "confidence_active_threshold": 0.90,
+                            "confidence_redetect_threshold": 0.80,
+                            "max_track_loss_frames": 2,
                             "filter_suspect_static_target": true,
                             "static_center_threshold": 2.0,
                             "static_size_threshold": 2.0,
-                            "static_frame_threshold": 30
+                            "static_frame_threshold": 90
                         }
                     },
-                    "io_info":[
+                    "io_info": [
                         {
-                            "input_path":"rtsp://192.168.1.80:8554/uav.264",
-                            "input_type":"rtsp",
-                            "output_path": "rtsp://192.168.1.80/live/uav",
-                            "output_type": "rtsp",
-                            "channel_id":0,
-                            "rtsp_config": {
+                            "input_path": "/root/work/AntiUav/data/test.mp4",
+                            "input_type": "video",
+                            "output_path": "hdmi0",
+                            "output_type": "hdmi",
+                            "channel_id": 0,
+                            "hdmi_config": {
                                 "output_width": 1920,
                                 "output_height": 1080,
-                                "output_fps": 20,
-                                "transport": "udp",
-                                "buffer_size": 1024000,
-                                "max_delay": 200000
-                            },
-                            "h264_config": {
-                                "gop_size": 25,
-                                "rc_mode": 2,
-                                "max_bitrate": 10000,
-                                "profile": "main"
+                                "output_fps": 30
                             }
                         }
                     ]

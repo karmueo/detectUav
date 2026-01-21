@@ -4,9 +4,11 @@
 #include "AclLiteModel.h"
 #include "AclLiteThread.h"
 #include "Params.h"
+#include <array>
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include <string>
+#include <utility>
 #include <vector>
 
 struct DrBBox
@@ -34,7 +36,7 @@ class Tracking : public AclLiteThread
   public:
     /**
      * @brief 构造函数
-     * @param model_path 输入：OM 模型文件路径
+     * @param model_path 输入：Nanotrack 模型路径，支持单个 head 路径或“head;backbone;search”三段配置
      */
     Tracking(const std::string &model_path);
 
@@ -163,151 +165,239 @@ class Tracking : public AclLiteThread
     void setStaticFrameThreshold(int frames);
 
     /**
-     * @brief 设置模板输入数据
-     * @param data 输入：数据指针
-     * @param size 输入：数据大小（元素个数）
-     */
-    void setInputTemplateData(const float *data, size_t size);
-
-    /**
-     * @brief 设置在线模板输入数据
-     * @param data 输入：数据指针
-     * @param size 输入：数据大小（元素个数）
-     */
-    void setInputOnlineTemplateData(const float *data, size_t size);
-
-    /**
-     * @brief 设置搜索输入数据
-     * @param data 输入：数据指针
-     * @param size 输入：数据大小（元素个数）
-     */
-    void setInputSearchData(const float *data, size_t size);
-
-    /**
-     * @brief 执行推理
-     */
-    void infer();
-
-    /**
-     * @brief 获取预测框输出
-     * @return 预测框数据向量（大小为4）
-     */
-    std::vector<float> getOutputPredBoxes() const;
-
-    /**
-     * @brief 获取预测分数输出
-     * @return 预测分数数据向量（大小为1）
-     */
-    std::vector<float> getOutputPredScores() const;
-    
-    /**
      * @brief 发送跟踪状态反馈给DataInput线程
      * @param detectDataMsg 输入：检测数据消息
      */
     void SendTrackingStateFeedback(std::shared_ptr<DetectDataMsg> detectDataMsg);
     
     private:
-    /**
-     * @brief 重置最大预测分数
-     */
-    void resetMaxPredScore();
-
     AclLiteError MsgSend(std::shared_ptr<DetectDataMsg> detectDataMsg);
 
-    /// 归一化常量
-    static const float mean_vals[3]; ///< 均值常量
-    static const float norm_vals[3]; ///< 方差常量
+    /**
+     * @brief 初始化 Nanotrack 模型路径
+     * @param model_path 输入：配置中的模型路径字符串
+     */
+    void InitNanotrackModelPath(const std::string &model_path);
 
     /**
-     * @brief 从图像采样目标区域
-     * @param img 输入：输入图像
-     * @param patch 输出：采样后的图像块
-     * @param bbox 输入：边界框
-     * @param factor 输入：搜索区域因子
-     * @param output_size 输入：输出大小
-     * @param resize_factor 输出：缩放因子
+     * @brief 初始化 Nanotrack 模型输入输出尺寸
      * @return 成功返回 0，失败返回 -1
      */
-    int sample_target(
-        const cv::Mat &img,
-        cv::Mat       &patch,
-        const DrBBox  &bbox,
-        float          factor,
-        int            output_size,
-        float         &resize_factor);
+    int InitNanotrackModelIO();
 
     /**
-     * @brief 对图像进行半归一化处理
-     * @param img 输入：输入图像
-     * @param output 输出：归一化后的数据
+     * @brief 运行模板 Backbone 推理
+     * @param input 输入：模板图像 CHW 数据
+     * @param out_shape 输出：特征张量形状
+     * @return 输出特征向量
      */
-    void half_norm(const cv::Mat &img, float *output);
+    std::vector<float> RunBackbone(const std::vector<float> &input,
+                                   std::vector<int64_t> &out_shape);
 
     /**
-     * @brief 计算边界框
-     * @param pred_boxes 输入：预测框数据
-     * @param resize_factor 输入：缩放因子
-     * @param search_size 输入：搜索大小
-     * @return 计算后的边界框
+     * @brief 运行搜索 Backbone 推理
+     * @param input 输入：搜索图像 CHW 数据
+     * @param out_shape 输出：特征张量形状
+     * @return 输出特征向量
      */
-    DrBBox
-    cal_bbox(const float *pred_boxes, float resize_factor, int search_size);
+    std::vector<float> RunSearchBackbone(const std::vector<float> &input,
+                                         std::vector<int64_t> &out_shape);
 
     /**
-     * @brief 将边界框映射回原图坐标
-     * @param box 输入输出：边界框
-     * @param resize_factor 输入：缩放因子
-     * @param search_size 输入：搜索大小
+     * @brief 运行 Head 推理
+     * @param zf 输入：模板特征
+     * @param zf_shape 输入：模板特征形状
+     * @param xf 输入：搜索特征
+     * @param xf_shape 输入：搜索特征形状
+     * @param cls_shape 输出：分类输出形状
+     * @param loc_shape 输出：回归输出形状
+     * @return 分类与回归输出
      */
-    void map_box_back(DrBBox &box, float resize_factor, int search_size);
+    std::pair<std::vector<float>, std::vector<float>>
+    RunHead(const std::vector<float> &zf,
+            const std::vector<int64_t> &zf_shape,
+            const std::vector<float> &xf,
+            const std::vector<int64_t> &xf_shape,
+            std::vector<int64_t> &cls_shape,
+            std::vector<int64_t> &loc_shape);
 
     /**
-     * @brief 裁剪边界框到图像边界
-     * @param box 输入输出：边界框
-     * @param img_h 输入：图像高度
-     * @param img_w 输入：图像宽度
-     * @param border 输入：边界边距
+     * @brief 确保 score 尺寸并更新窗口与点
+     * @param size 输入：score 尺寸
      */
-    void clip_box(DrBBox &box, int img_h, int img_w, int border);
+    void EnsureScoreSize(int size);
+
+    /**
+     * @brief 构建汉宁窗
+     * @param size 输入：窗口尺寸
+     * @return 窗口数据
+     */
+    std::vector<float> BuildWindow(int size);
+
+    /**
+     * @brief 构建特征点坐标
+     * @param stride 输入：步长
+     * @param size 输入：score 尺寸
+     * @return 点坐标列表
+     */
+    std::vector<cv::Point2f> BuildPoints(int stride, int size);
+
+    /**
+     * @brief 裁剪并缩放子图
+     * @param img 输入：原图
+     * @param pos 输入：中心位置
+     * @param model_sz 输入：模型输入尺寸
+     * @param original_sz 输入：裁剪尺寸
+     * @param avg_chans 输入：均值
+     * @return CHW 数据
+     */
+    std::vector<float> GetSubwindow(const cv::Mat &img,
+                                    const cv::Point2f &pos,
+                                    int model_sz,
+                                    int original_sz,
+                                    const cv::Scalar &avg_chans);
+
+    /**
+     * @brief 对齐特征图尺寸
+     * @param feat 输入：特征数据
+     * @param shape 输入：特征形状
+     * @param target_hw 输入：目标高宽
+     * @param out_shape 输出：对齐后形状
+     * @return 对齐后特征
+     */
+    std::vector<float> AlignFeature(const std::vector<float> &feat,
+                                    const std::vector<int64_t> &shape,
+                                    const std::pair<int, int> &target_hw,
+                                    std::vector<int64_t> &out_shape);
+
+    /**
+     * @brief 解析分类得分
+     * @param cls 输入：分类输出
+     * @param shape 输入：分类形状
+     * @return 得分向量
+     */
+    std::vector<float> ConvertScore(const std::vector<float> &cls,
+                                    const std::vector<int64_t> &shape) const;
+
+    /**
+     * @brief 解析回归框
+     * @param loc 输入：回归输出
+     * @param shape 输入：回归形状
+     * @return bbox 向量
+     */
+    std::vector<float> ConvertBBox(const std::vector<float> &loc,
+                                   const std::vector<int64_t> &shape) const;
+
+    /**
+     * @brief 边界框裁剪
+     * @param cx 输入：中心 x
+     * @param cy 输入：中心 y
+     * @param width 输入：宽度
+     * @param height 输入：高度
+     * @param rows 输入：图像高
+     * @param cols 输入：图像宽
+     * @return 裁剪后参数
+     */
+    std::array<float, 4> BboxClip(float cx, float cy, float width,
+                                  float height, int rows, int cols) const;
+
+    /**
+     * @brief 从输出维度构造形状向量
+     * @param dims 输入：ACL 输出维度
+     * @return 形状向量
+     */
+    std::vector<int64_t> DimsToShape(const aclmdlIODims &dims) const;
+
+    /**
+     * @brief 从输入元素数推导方形高宽
+     * @param elements 输入：元素数
+     * @param channels 输入：通道数
+     * @return 高宽对
+     */
+    std::pair<int, int> CalcSquareHW(size_t elements, int channels) const;
 
     bool IsBlockedDetection(const DetectionOBB &det) const;
     bool UpdateStaticTrackingState(const DrBBox &box);
     void FillStaticFilterState(std::shared_ptr<DetectDataMsg> &msg) const;
 
-    /// 输入缓冲区大小（元素数，非字节）
-    size_t input_template_size;        ///< 模板输入缓冲区大小
-    size_t input_online_template_size; ///< 在线模板输入缓冲区大小
-    size_t input_search_size;          ///< 搜索输入缓冲区大小
-    size_t output_pred_boxes_size;     ///< 预测框输出缓冲区大小
-    size_t output_pred_scores_size;    ///< 预测分数输出缓冲区大小
+    struct TrackerConfig
+    {
+        int   exemplar_size = 127;     ///< 模板尺寸
+        int   instance_size = 255;     ///< 搜索尺寸
+        int   score_size = 15;         ///< score 尺寸
+        int   stride = 16;             ///< 步长
+        float context_amount = 0.5f;   ///< 上下文比例
+        float window_influence = 0.455f; ///< 窗口影响
+        float penalty_k = 0.138f;      ///< 惩罚系数
+        float lr = 0.348f;             ///< 学习率
+    };
 
-    /// 主机内存缓冲区
-    float *input_template;        ///< 模板输入数据
-    float *input_online_template; ///< 在线模板输入数据
-    float *input_search;          ///< 搜索输入数据
-    float *output_pred_boxes;     ///< 预测框输出数据
-    float *output_pred_scores;    ///< 预测分数输出数据
+    TrackerConfig cfg_; ///< 跟踪器配置
 
-    /// 模板大小配置
-    int   template_size;   ///< 模板大小
-    int   search_size;     ///< 搜索大小
-    float template_factor; ///< 模板因子
-    float search_factor;   ///< 搜索因子
+    /// 模型 I/O 尺寸（元素数，非字节）
+    size_t backbone_input_size_ = 0;      ///< backbone 输入元素数
+    size_t backbone_output_size_ = 0;     ///< backbone 输出元素数
+    size_t search_input_size_ = 0;        ///< search backbone 输入元素数
+    size_t search_output_size_ = 0;       ///< search backbone 输出元素数
+    size_t head_input_z_size_ = 0;        ///< head 模板输入元素数
+    size_t head_input_x_size_ = 0;        ///< head 搜索输入元素数
+    size_t head_output_cls_size_ = 0;     ///< head 分类输出元素数
+    size_t head_output_loc_size_ = 0;     ///< head 回归输出元素数
+
+    /// 模型输出缓存
+    std::vector<float> backbone_output_; ///< backbone 输出缓存
+    std::vector<float> search_output_;   ///< search 输出缓存
+    std::vector<float> head_output_cls_; ///< head 分类输出缓存
+    std::vector<float> head_output_loc_; ///< head 回归输出缓存
+
+    /// 模型输出形状
+    std::vector<int64_t> backbone_output_shape_; ///< backbone 输出形状
+    std::vector<int64_t> search_output_shape_;   ///< search 输出形状
+    std::vector<int64_t> head_cls_shape_;        ///< head 分类形状
+    std::vector<int64_t> head_loc_shape_;        ///< head 回归形状
+
+    /// 特征图对齐尺寸
+    std::pair<int, int> head_template_hw_{-1, -1}; ///< head 模板高宽
+    std::pair<int, int> head_search_hw_{-1, -1};   ///< head 搜索高宽
+    std::pair<int, int> template_input_hw_{-1, -1}; ///< 模板输入高宽
+    std::pair<int, int> search_input_hw_{-1, -1};   ///< 搜索输入高宽
+
+    /// Nanotrack 状态
+    std::vector<float> window_;          ///< 汉宁窗
+    std::vector<cv::Point2f> points_;    ///< 特征点坐标
+    cv::Point2f center_pos_{0.f, 0.f};   ///< 目标中心
+    cv::Point2f size_{0.f, 0.f};         ///< 目标尺寸
+    cv::Scalar channel_average_;         ///< 通道均值
+    std::vector<float> zf_;              ///< 模板特征
+    std::vector<int64_t> zf_shape_;      ///< 模板特征形状
+    std::vector<int64_t> subwindow_shape_; ///< 子图形状
+    float last_score_ = 0.f;             ///< 上次得分
+    float search_scale_factor_ = 1.0f;   ///< 搜索缩放因子
+
+    /// 模型路径
+    std::string head_model_path_;        ///< head 模型路径
+    std::string backbone_model_path_;    ///< backbone 模型路径
+    std::string search_model_path_;      ///< search backbone 模型路径
+
+    /// OM 模型
+    AclLiteModel head_model_;            ///< head 模型
+    AclLiteModel backbone_model_;        ///< backbone 模型
+    AclLiteModel search_model_;          ///< search backbone 模型
+    bool         has_search_backbone_ = false; ///< 是否存在独立 search backbone
+
+    int head_input_z_index_ = 0;        ///< head 模板输入索引
+    int head_input_x_index_ = 1;        ///< head 搜索输入索引
+    int head_output_cls_index_ = 0;      ///< head 分类输出索引
+    int head_output_loc_index_ = 1;      ///< head 回归输出索引
 
     /// 跟踪状态
     DrOBB              object_box;                      ///< 对象边界框
     DrBBox             state;                           ///< 当前状态
     int                frame_id;                        ///< 帧 ID
-    float              max_pred_score;                  ///< 最大预测分数
     int                update_interval;                 ///< 更新间隔
     float              template_update_score_threshold; ///< 模板更新分数阈值
     float              max_score_decay;                 ///< 最大分数衰减
-    std::vector<float> new_online_template;             ///< 新在线模板
-
-    /// OM 模型
-    AclLiteModel model_;             ///< ACL 模型
-    std::string  model_path_;        ///< 模型路径
-    bool         model_initialized_; ///< 模型是否已初始化
+    bool               model_initialized_;              ///< 模型是否已初始化
 
     /// 线程/上下文
     aclrtRunMode runMode_;                      ///< 运行模式

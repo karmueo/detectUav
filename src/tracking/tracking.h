@@ -141,6 +141,24 @@ class Tracking : public AclLiteThread
     void setMaxTrackLossFrames(int maxFrames);
 
     /**
+     * @brief 设置是否启用检测验证跟踪
+     * @param enabled 输入：true 启用，false 关闭
+     */
+    void setTrackingValidationEnabled(bool enabled);
+
+    /**
+     * @brief 设置检测验证的 IOU 阈值
+     * @param threshold 输入：IOU 阈值
+     */
+    void setTrackingValidationIouThreshold(float threshold);
+
+    /**
+     * @brief 设置检测验证的最大错误次数
+     * @param maxErrors 输入：最大错误次数
+     */
+    void setTrackingValidationMaxErrors(int maxErrors);
+
+    /**
      * @brief 是否启用可疑静止目标过滤
      * @param enabled 输入：true 启用，false 关闭
      */
@@ -316,6 +334,14 @@ class Tracking : public AclLiteThread
      */
     std::pair<int, int> CalcSquareHW(size_t elements, int channels) const;
 
+    /**
+     * @brief 计算两个检测框的 IOU
+     * @param a 输入：检测框 A
+     * @param b 输入：检测框 B
+     * @return IOU 值，范围 [0,1]
+     */
+    float ComputeIou(const DetectionOBB &a, const DetectionOBB &b) const;
+
     bool IsBlockedDetection(const DetectionOBB &det) const;
     bool UpdateStaticTrackingState(const DrBBox &box);
     void FillStaticFilterState(std::shared_ptr<DetectDataMsg> &msg) const;
@@ -422,6 +448,12 @@ class Tracking : public AclLiteThread
     DrBBox last_box_ = {0, 0, 0, 0, 0, 0, 0, 0};
     bool   has_blocked_target_ = false;       ///< 是否存在已阻断目标
     DrBBox blocked_target_ = {0, 0, 0, 0, 0, 0, 0, 0};
+
+    /// ============ 检测验证跟踪 ============
+    bool   tracking_validation_enabled_ = false; ///< 是否启用检测验证跟踪
+    float  tracking_validation_iou_threshold_ = 0.3f; ///< IOU 阈值
+    int    tracking_validation_max_errors_ = 3; ///< 最大错误次数
+    int    tracking_validation_error_count_ = 0; ///< 当前错误次数
 };
 
 #endif // TRACKING_H

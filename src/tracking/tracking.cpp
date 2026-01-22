@@ -310,6 +310,7 @@ AclLiteError Tracking::Process(int msgId, std::shared_ptr<void> data)
                         {
                             tracking_initialized_ = true;
                             track_loss_count_ = 0;
+                            tracking_validation_error_count_ = 0;
                             current_tracking_confidence_ = best.score;
                             static_frame_count_ = 0;
                             last_box_ = initBox.box;
@@ -365,9 +366,73 @@ AclLiteError Tracking::Process(int msgId, std::shared_ptr<void> data)
                 detectDataMsg->trackingConfidence = tracked.score;
                 detectDataMsg->needRedetection = false;
                 track_loss_count_ = 0;
+
+                bool needRedetection = false; // 是否触发重新检测
+                if (tracking_validation_enabled_ && detectDataMsg->trackingActive)
+                {
+                    const DetectionOBB *bestPtr = nullptr; // 最佳检测框
+                    for (size_t i = 0; i < detectDataMsg->detections.size(); ++i)
+                    {
+                        if (!IsBlockedDetection(detectDataMsg->detections[i]))
+                        {
+                            bestPtr = &detectDataMsg->detections[i];
+                            break;
+                        }
+                    }
+                    if (bestPtr == nullptr)
+                    {
+                        tracking_validation_error_count_++;
+                        ACLLITE_LOG_WARNING(
+                            "[Tracking Ch%d Frame%d] Validation missing detection, error_count=%d",
+                            detectDataMsg->channelId,
+                            detectDataMsg->msgNum,
+                            tracking_validation_error_count_);
+                    }
+                    else
+                    {
+                        float iou = ComputeIou(detectDataMsg->trackingResult.bbox, *bestPtr); // IOU值
+                        if (iou < tracking_validation_iou_threshold_)
+                        {
+                            tracking_validation_error_count_++;
+                            ACLLITE_LOG_WARNING(
+                                "[Tracking Ch%d Frame%d] Validation IOU=%.3f below %.3f, error_count=%d",
+                                detectDataMsg->channelId,
+                                detectDataMsg->msgNum,
+                                iou,
+                                tracking_validation_iou_threshold_,
+                                tracking_validation_error_count_);
+                        }
+                        else
+                        {
+                            tracking_validation_error_count_ = 0;
+                        }
+                    }
+
+                    if (tracking_validation_error_count_ >= tracking_validation_max_errors_)
+                    {
+                        needRedetection = true;
+                        tracking_validation_error_count_ = 0;
+                        tracking_initialized_ = false;
+                        track_loss_count_ = 0;
+                        static_frame_count_ = 0;
+                        has_last_box_ = false;
+                        ACLLITE_LOG_INFO(
+                            "[Tracking Ch%d] Validation failed %d times, requesting redetection",
+                            detectDataMsg->channelId,
+                            tracking_validation_max_errors_);
+                    }
+                }
+
+                if (needRedetection)
+                {
+                    detectDataMsg->trackingActive = false;
+                    detectDataMsg->needRedetection = true;
+                    detectDataMsg->trackingResult.isTracked = false;
+                    SendTrackingStateFeedback(detectDataMsg);
+                }
                 
                 // Keep old fields for backward compatibility
-                detectDataMsg->hasTracking = true;
+                detectDataMsg->hasTracking = !needRedetection;
                 detectDataMsg->trackScore = tracked.score;
                 // keep backward compat init score
                 detectDataMsg->trackInitScore = tracked.initScore;
@@ -413,6 +478,7 @@ AclLiteError Tracking::Process(int msgId, std::shared_ptr<void> data)
             }
             
             // 仍然发送到输出(显示原图)
+            tracking_validation_error_count_ = 0;
             MsgSend(detectDataMsg);
             return ACLLITE_OK;
         }
@@ -505,6 +571,7 @@ AclLiteError Tracking::Process(int msgId, std::shared_ptr<void> data)
             // 如果需要重新检测,反馈给DataInput
             if (needRedetection)
             {
+                tracking_validation_error_count_ = 0;
                 SendTrackingStateFeedback(detectDataMsg);
             }
         }
@@ -632,6 +699,27 @@ void Tracking::setConfidenceRedetectThreshold(float threshold)
 void Tracking::setMaxTrackLossFrames(int maxFrames)
 {
     this->max_track_loss_frames_ = maxFrames;
+}
+
+void Tracking::setTrackingValidationEnabled(bool enabled)
+{
+    this->tracking_validation_enabled_ = enabled;
+}
+
+void Tracking::setTrackingValidationIouThreshold(float threshold)
+{
+    if (threshold >= 0.0f)
+    {
+        this->tracking_validation_iou_threshold_ = threshold;
+    }
+}
+
+void Tracking::setTrackingValidationMaxErrors(int maxErrors)
+{
+    if (maxErrors > 0)
+    {
+        this->tracking_validation_max_errors_ = maxErrors;
+    }
 }
 
 void Tracking::setStaticTargetFilterEnabled(bool enabled)
@@ -1617,4 +1705,25 @@ std::pair<int, int> Tracking::CalcSquareHW(size_t elements,
         return {-1, -1};
     }
     return {side, side};
+}
+
+float Tracking::ComputeIou(const DetectionOBB &a, const DetectionOBB &b) const
+{
+    float inter_x0 = std::max(a.x0, b.x0); // 交集左上角x
+    float inter_y0 = std::max(a.y0, b.y0); // 交集左上角y
+    float inter_x1 = std::min(a.x1, b.x1); // 交集右下角x
+    float inter_y1 = std::min(a.y1, b.y1); // 交集右下角y
+
+    float inter_w = std::max(0.0f, inter_x1 - inter_x0); // 交集宽
+    float inter_h = std::max(0.0f, inter_y1 - inter_y0); // 交集高
+    float inter_area = inter_w * inter_h; // 交集面积
+
+    float area_a = std::max(0.0f, a.x1 - a.x0) * std::max(0.0f, a.y1 - a.y0); // 框A面积
+    float area_b = std::max(0.0f, b.x1 - b.x0) * std::max(0.0f, b.y1 - b.y0); // 框B面积
+    float union_area = area_a + area_b - inter_area; // 并集面积
+    if (union_area <= 0.0f)
+    {
+        return 0.0f;
+    }
+    return inter_area / union_area;
 }

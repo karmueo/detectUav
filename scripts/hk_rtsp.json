@@ -18,6 +18,10 @@
                             "confidence_active_threshold": 0.60,
                             "confidence_redetect_threshold": 0.60,
                             "max_track_loss_frames": 5,
+                            "enable_tracking_validation": false,
+                            "validation_interval": 10,
+                            "validation_iou_threshold": 0.30,
+                            "validation_max_error_count": 3,
                             "score_decay_factor": 0.98
                         }
                     },

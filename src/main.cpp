@@ -637,6 +637,98 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                             &channel_target_class_ids);
                     }
 
+                    // 解析跟踪配置（通道级可覆盖）
+                    bool enableTracking = enableTrackingModel;
+                    string trackModelPath = trackModelPathModel;
+                    Json::Value trackingConfig;
+                    if (!hasTrackConfigModel)
+                    {
+                        if (root["device_config"][i]["model_config"][j]["io_info"][k]["enable_tracking"].type() != Json::nullValue)
+                        {
+                            enableTracking = root["device_config"][i]["model_config"][j]["io_info"][k]["enable_tracking"].asBool();
+                        }
+                        if (enableTracking && root["device_config"][i]["model_config"][j]["io_info"][k]["track_model_path"].type() != Json::nullValue)
+                        {
+                            trackModelPath = root["device_config"][i]["model_config"][j]["io_info"][k]["track_model_path"].asString();
+                        }
+                    }
+                    if (trackingConfigModel.type() != Json::nullValue)
+                    {
+                        trackingConfig = trackingConfigModel;
+                    }
+                    else if (root["device_config"][i]["model_config"][j]["io_info"][k]["tracking_config"].type() != Json::nullValue)
+                    {
+                        trackingConfig = root["device_config"][i]["model_config"][j]["io_info"][k]["tracking_config"];
+                    }
+
+                    bool  enableTrackingValidation = false; // 是否启用检测验证
+                    int   trackingValidationInterval = 0;   // 验证间隔
+                    float trackingValidationIouThreshold = 0.30f; // IOU阈值
+                    int   trackingValidationMaxErrors = 3;  // 最大错误次数
+                    if (trackingConfig.type() != Json::nullValue)
+                    {
+                        if (trackingConfig["enable_tracking_validation"].type() != Json::nullValue)
+                        {
+                            enableTrackingValidation =
+                                trackingConfig["enable_tracking_validation"].asBool();
+                        }
+                        if (trackingConfig["validation_interval"].type() != Json::nullValue)
+                        {
+                            int interval =
+                                trackingConfig["validation_interval"].asInt(); // 验证间隔
+                            if (interval > 0)
+                            {
+                                trackingValidationInterval = interval;
+                            }
+                            else
+                            {
+                                ACLLITE_LOG_WARNING(
+                                    "tracking validation_interval=%d invalid for channel %d",
+                                    interval,
+                                    channelId);
+                            }
+                        }
+                        if (trackingConfig["validation_iou_threshold"].type() != Json::nullValue)
+                        {
+                            float threshold =
+                                trackingConfig["validation_iou_threshold"].asFloat(); // IOU阈值
+                            if (threshold >= 0.0f && threshold <= 1.0f)
+                            {
+                                trackingValidationIouThreshold = threshold;
+                            }
+                            else
+                            {
+                                ACLLITE_LOG_WARNING(
+                                    "tracking validation_iou_threshold=%.2f out of range for channel %d",
+                                    threshold,
+                                    channelId);
+                            }
+                        }
+                        if (trackingConfig["validation_max_error_count"].type() != Json::nullValue)
+                        {
+                            int maxErrors =
+                                trackingConfig["validation_max_error_count"].asInt(); // 最大错误次数
+                            if (maxErrors > 0)
+                            {
+                                trackingValidationMaxErrors = maxErrors;
+                            }
+                            else
+                            {
+                                ACLLITE_LOG_WARNING(
+                                    "tracking validation_max_error_count=%d invalid for channel %d",
+                                    maxErrors,
+                                    channelId);
+                            }
+                        }
+                    }
+                    if (enableTrackingValidation && trackingValidationInterval <= 0)
+                    {
+                        ACLLITE_LOG_WARNING(
+                            "tracking validation enabled but interval invalid for channel %d, disabling validation",
+                            channelId);
+                        enableTrackingValidation = false;
+                    }
+
                     // Create Thread for the input data:
                     AclLiteThreadParam dataInputParam;
                     dataInputParam.threadInst =
@@ -650,7 +742,9 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                                             kBatch,
                                             kFramesPerSecond,
                                             channelFrameDecimation,
-                                            outputType);
+                                            outputType,
+                                            enableTrackingValidation,
+                                            trackingValidationInterval);
                     dataInputParam.threadInstName.assign(dataInputName.c_str());
                     dataInputParam.context = context;
                     dataInputParam.runMode = runMode;
@@ -689,23 +783,6 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                     }
 
                     // 创建单目标跟踪线程（Tracking），每个通道一个实例
-                    // Use model-level tracking configuration
-                    bool enableTracking = enableTrackingModel;
-                    string trackModelPath = trackModelPathModel;
-                    
-                    // If model-level config absent, fallback to io_info-level
-                    if (!hasTrackConfigModel)
-                    {
-                        if (root["device_config"][i]["model_config"][j]["io_info"][k]["enable_tracking"].type() != Json::nullValue)
-                        {
-                            enableTracking = root["device_config"][i]["model_config"][j]["io_info"][k]["enable_tracking"].asBool();
-                        }
-                        if (enableTracking && root["device_config"][i]["model_config"][j]["io_info"][k]["track_model_path"].type() != Json::nullValue)
-                        {
-                            trackModelPath = root["device_config"][i]["model_config"][j]["io_info"][k]["track_model_path"].asString();
-                        }
-                    }
-                    
                     string trackName = kTrackName + to_string(channelId);
                     Tracking* trackingInst = nullptr;
                     if (enableTracking)
@@ -713,15 +790,6 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                         trackingInst = new Tracking(trackModelPath); // 使用配置文件中的模型路径
                         
                         // 读取并设置跟踪配置参数
-                        Json::Value trackingConfig;
-                        if (trackingConfigModel.type() != Json::nullValue)
-                        {
-                            trackingConfig = trackingConfigModel;
-                        }
-                        else if (root["device_config"][i]["model_config"][j]["io_info"][k]["tracking_config"].type() != Json::nullValue)
-                        {
-                            trackingConfig = root["device_config"][i]["model_config"][j]["io_info"][k]["tracking_config"];
-                        }
                         if (trackingConfig.type() != Json::nullValue)
                         {
                             
@@ -779,6 +847,17 @@ void CreateALLThreadInstance(vector<AclLiteThreadParam> &threadTbl,
                                 ACLLITE_LOG_INFO("Set tracking static_frame_threshold=%d for channel %d", threshold, channelId);
                             }
                         }
+
+                        trackingInst->setTrackingValidationEnabled(enableTrackingValidation);
+                        trackingInst->setTrackingValidationIouThreshold(trackingValidationIouThreshold);
+                        trackingInst->setTrackingValidationMaxErrors(trackingValidationMaxErrors);
+                        ACLLITE_LOG_INFO(
+                            "Set tracking validation enable=%s interval=%d iou_threshold=%.2f max_errors=%d for channel %d",
+                            enableTrackingValidation ? "true" : "false",
+                            trackingValidationInterval,
+                            trackingValidationIouThreshold,
+                            trackingValidationMaxErrors,
+                            channelId);
                         
                         AclLiteThreadParam trackParam;
                         trackParam.threadInst = trackingInst;

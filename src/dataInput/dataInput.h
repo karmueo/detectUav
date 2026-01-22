@@ -40,7 +40,9 @@ class DataInputThread : public AclLiteThread
                     uint32_t      batch,
                     int           framesPerSecond,
                     int           frameSkip = 0,
-                    std::string   outputType = "");
+                    std::string   outputType = "",
+                    bool          trackingValidationEnabled = false,
+                    int           trackingValidationInterval = 0);
 
     ~DataInputThread();
     AclLiteError Init();
@@ -105,6 +107,9 @@ class DataInputThread : public AclLiteThread
     float   blockedHeight_;              // 被阻断目标高
     float   staticCenterThreshold_;      // 中心阈值（像素）
     float   staticSizeThreshold_;        // 尺寸阈值（像素）
+    bool    trackingValidationEnabled_;  // 是否启用检测验证跟踪
+    int     trackingValidationInterval_; // 检测验证间隔帧数
+    int     trackingValidationFrameCount_; // 跟踪内计数
 };
 
 #endif

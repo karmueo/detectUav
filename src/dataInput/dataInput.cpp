@@ -42,7 +42,9 @@ DataInputThread::DataInputThread(
     uint32_t      batch,
     int           framesPerSecond,
     int           frameSkip,
-    string        outputType)
+    string        outputType,
+    bool          trackingValidationEnabled,
+    int           trackingValidationInterval)
     : deviceId_(deviceId),
       channelId_(channelId),
       frameCnt_(0),
@@ -82,7 +84,10 @@ DataInputThread::DataInputThread(
       blockedWidth_(0.0f),
       blockedHeight_(0.0f),
       staticCenterThreshold_(0.0f),
-      staticSizeThreshold_(0.0f)
+      staticSizeThreshold_(0.0f),
+      trackingValidationEnabled_(trackingValidationEnabled),
+      trackingValidationInterval_(trackingValidationInterval),
+      trackingValidationFrameCount_(0)
 {
 }
 
@@ -251,6 +256,7 @@ AclLiteError DataInputThread::Process(int msgId, shared_ptr<void> msgData)
             shared_ptr<DetectDataMsg> trackStateMsg = static_pointer_cast<DetectDataMsg>(msgData);
             if (trackStateMsg)
             {
+                bool wasTrackingActive = isTrackingActive_; // 记录上一状态
                 isTrackingActive_ = trackStateMsg->trackingActive;
                 currentTrackingConfidence_ = trackStateMsg->trackingConfidence;
                 filterStaticTargetEnabled_ = trackStateMsg->filterStaticTargetEnabled;
@@ -265,6 +271,14 @@ AclLiteError DataInputThread::Process(int msgId, shared_ptr<void> msgData)
                     if (trackStateMsg->trackingActive) {
                         isFirstFrame_ = false;
                     }
+                if (!wasTrackingActive && trackStateMsg->trackingActive)
+                {
+                    trackingValidationFrameCount_ = 0;
+                }
+                if (!trackStateMsg->trackingActive)
+                {
+                    trackingValidationFrameCount_ = 0;
+                }
                 
                 if (trackStateMsg->needRedetection)
                 {
@@ -510,7 +524,18 @@ AclLiteError DataInputThread::MsgRead(shared_ptr<DetectDataMsg> &detectDataMsg)
     // 设置跟踪状态信息
     detectDataMsg->trackingActive = isTrackingActive_;
     detectDataMsg->trackingConfidence = currentTrackingConfidence_;
-    detectDataMsg->skipInference = isTrackingActive_ && !isFirstFrame_;
+    bool forceValidation = false; // 是否强制进行检测验证
+    if (trackingValidationEnabled_ && isTrackingActive_ &&
+        trackingValidationInterval_ > 0)
+    {
+        trackingValidationFrameCount_++;
+        if (trackingValidationFrameCount_ % trackingValidationInterval_ == 0)
+        {
+            forceValidation = true;
+        }
+    }
+    detectDataMsg->skipInference =
+        isTrackingActive_ && !isFirstFrame_ && !forceValidation;
     detectDataMsg->needRedetection = false;
     detectDataMsg->filterStaticTargetEnabled = filterStaticTargetEnabled_;
     detectDataMsg->hasBlockedTarget = hasBlockedTarget_;
@@ -522,6 +547,10 @@ AclLiteError DataInputThread::MsgRead(shared_ptr<DetectDataMsg> &detectDataMsg)
     detectDataMsg->staticSizeThreshold = staticSizeThreshold_;
     detectDataMsg->decimatedFrame =
         frameSkip_ > 0 && (detectDataMsg->msgNum % (frameSkip_ + 1) != 0);
+    if (forceValidation && detectDataMsg->decimatedFrame)
+    {
+        detectDataMsg->decimatedFrame = false;
+    }
     detectDataMsg->reusePrevResult = detectDataMsg->decimatedFrame;
     
     msgNum_++;
